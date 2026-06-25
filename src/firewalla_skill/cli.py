@@ -326,6 +326,83 @@ def write_json(path: Path, payload: object) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def load_json(path: str) -> object:
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def bucket_counts(values: Sequence[object]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        key = str(value) if value not in (None, "") else "<missing>"
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+
+
+def summarize_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
+    devices = snapshot.get("devices") if isinstance(snapshot.get("devices"), list) else []
+    alarms = snapshot.get("alarms") if isinstance(snapshot.get("alarms"), list) else []
+    flows = snapshot.get("flows") if isinstance(snapshot.get("flows"), list) else []
+    box = snapshot.get("box") if isinstance(snapshot.get("box"), dict) else {}
+
+    alarm_types: list[object] = []
+    alarm_states: list[object] = []
+    for alarm in alarms:
+        if not isinstance(alarm, dict):
+            continue
+        payload = alarm.get("alarm") if isinstance(alarm.get("alarm"), dict) else {}
+        alarm_types.append(payload.get("type"))
+        alarm_states.append(payload.get("state"))
+
+    flow_ports: list[object] = []
+    flow_protocols: list[object] = []
+    flow_directions: list[object] = []
+    for flow in flows:
+        if not isinstance(flow, dict):
+            continue
+        value = flow.get("value") if isinstance(flow.get("value"), dict) else {}
+        flow_ports.append(value.get("dp"))
+        flow_protocols.append(value.get("pr"))
+        flow_directions.append(value.get("fd"))
+
+    notable_items: list[str] = []
+    if box.get("redis_ping") != "PONG":
+        notable_items.append("Redis health probe did not return PONG.")
+    if alarms:
+        notable_items.append(f"There are {len(alarms)} sampled active alarms.")
+    if flows:
+        notable_items.append(f"There are {len(flows)} sampled recent system flows.")
+    if not devices:
+        notable_items.append("No device records were included in this bounded snapshot.")
+
+    next_questions = [
+        "Which sampled alarms are actionable versus expected household activity?",
+        "Which devices should be joined to alarm and flow records first?",
+        "Should future flow summaries aggregate by device, destination, port, or protocol?",
+    ]
+
+    summary = {
+        "headline": f"Snapshot contains {len(devices)} devices, {len(alarms)} alarms, and {len(flows)} sampled flows.",
+        "counts": {
+            "devices": len(devices),
+            "alarms": len(alarms),
+            "flows": len(flows),
+        },
+        "box": {
+            "redis_ping": box.get("redis_ping"),
+            "has_uptime": bool(box.get("uptime")),
+        },
+        "alarm_types": bucket_counts(alarm_types),
+        "alarm_states": bucket_counts(alarm_states),
+        "flow_top_ports": bucket_counts(flow_ports),
+        "flow_protocols": bucket_counts(flow_protocols),
+        "flow_directions": bucket_counts(flow_directions),
+        "notable_items": notable_items,
+        "next_questions": next_questions,
+        "collection": snapshot.get("collection", {}),
+    }
+    return redacted_json_value(summary)
+
+
 def build_snapshot(target: SshTarget, *, execute: bool, limit: int) -> tuple[dict[str, object], list[dict[str, object]]]:
     box, raw_health = collect_health(target, execute=execute)
     devices, raw_devices = collect_devices(target, execute=execute, limit=limit)
@@ -408,6 +485,27 @@ def cmd_dump_format(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_summary(args: argparse.Namespace) -> int:
+    if args.input:
+        loaded = load_json(args.input)
+        if not isinstance(loaded, dict):
+            raise SystemExit("summary input must be a JSON object")
+        summary = summarize_snapshot(loaded)
+    else:
+        target = env_target(args)
+        if not args.execute:
+            print(json.dumps({"dry_run": True, "message": "summary needs --input or --execute"}, indent=2))
+            return 0
+        snapshot, _raw = build_snapshot(target, execute=True, limit=args.limit)
+        summary = summarize_snapshot(snapshot)
+
+    if args.output:
+        write_json(Path(args.output), summary)
+    else:
+        print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", help=f"local JSON config path; default: {LOCAL_CONFIG}")
     parser.add_argument("--ssh-alias", help="SSH config Host alias; defaults to FIREWALLA_SSH_ALIAS")
@@ -455,6 +553,13 @@ def build_parser() -> argparse.ArgumentParser:
     dump_format.add_argument("--limit", type=int, default=5, help="bounded sample size per surface")
     dump_format.add_argument("--output-dir", default=DEFAULT_DUMP_DIR, help="git-ignored local dump directory")
     dump_format.set_defaults(func=cmd_dump_format)
+
+    summary = subparsers.add_parser("summary", help="summarize a redacted snapshot for AI analysis")
+    add_common_args(summary)
+    summary.add_argument("--input", help="read an existing redacted snapshot JSON")
+    summary.add_argument("--limit", type=int, default=5, help="bounded live sample size when using --execute")
+    summary.add_argument("--output", help="write summary JSON to this path")
+    summary.set_defaults(func=cmd_summary)
 
     return parser
 

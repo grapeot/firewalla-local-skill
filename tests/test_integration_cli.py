@@ -29,3 +29,13 @@ def test_dump_format_dry_run_does_not_create_files(capsys, tmp_path):
     payload = json.loads(capsys.readouterr().out)
     assert payload["dry_run"] is True
     assert not output_dir.exists()
+
+
+@pytest.mark.integration
+def test_summary_from_fixture_outputs_ai_contract(capsys):
+    assert main(["summary", "--input", "tests/fixtures/fake_snapshot.json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "headline" in payload
+    assert payload["counts"] == {"alarms": 1, "devices": 1, "flows": 0}
+    assert payload["alarm_types"] == {"ALARM_INTEL": 1}
+    assert payload["collection"]["redacted"] is True

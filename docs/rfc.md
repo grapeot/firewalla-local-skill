@@ -104,6 +104,7 @@ Initial commands:
 5. `firewalla-skill flows --mac <mac>`: list recent flow entries for one device MAC
 6. `firewalla-skill dump-format`: collect bounded examples for P0 surfaces into a git-ignored local artifact
 7. `firewalla-skill snapshot`: emit a redacted AI-readable JSON snapshot for box, devices, alarms, flows, and collection metadata
+8. `firewalla-skill summary`: emit a compact JSON situation summary from an existing snapshot or live bounded read
 
 The command builder enforces a Redis read-only allowlist. Mutation commands such as `SET` are rejected before execution.
 
@@ -141,6 +142,24 @@ The first stable schema is intentionally compact:
 ```
 
 `devices`, `alarms`, and `flows` start as bounded samples, not complete database exports. Aggregation can grow once the field formats are known.
+
+## Summary Schema
+
+`summary` produces a rule-based JSON brief that an AI agent can read before deciding whether deeper analysis is needed:
+
+```json
+{
+  "headline": "Snapshot contains 2 devices, 1 alarms, and 5 sampled flows.",
+  "counts": {},
+  "box": {},
+  "alarm_types": {},
+  "flow_top_ports": {},
+  "notable_items": [],
+  "next_questions": []
+}
+```
+
+The summary is deterministic and does not call an LLM. It is a compact analysis substrate, not the final natural-language report.
 
 ## Test Tiers
 

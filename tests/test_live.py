@@ -35,3 +35,12 @@ def test_live_dump_format_writes_gitignored_outputs(tmp_path):
     assert main(["dump-format", "--execute", "--limit", "2", "--output-dir", str(tmp_path)]) == 0
     files = list(Path(tmp_path).glob("firewalla_format_*.json"))
     assert len(files) == 2
+
+
+@pytest.mark.skipif(not live_enabled(), reason="set FIREWALLA_LIVE_TESTS=1 for live Firewalla tests")
+def test_live_summary_read_only_redacted(tmp_path):
+    output = tmp_path / "summary.json"
+    assert main(["summary", "--execute", "--limit", "2", "--output", str(output)]) == 0
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert "headline" in payload
+    assert set(payload["counts"]) == {"devices", "alarms", "flows"}

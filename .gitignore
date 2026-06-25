@@ -3,6 +3,8 @@
 !.env.example
 .firewalla.local.json
 .firewalla_dumps/
+reports/*
+!reports/.gitkeep
 .venv/
 __pycache__/
 *.py[cod]

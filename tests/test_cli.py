@@ -12,6 +12,7 @@ from firewalla_skill.cli import (
     pair_lines_to_dict,
     redact_sensitive_text,
     redacted_command,
+    summarize_snapshot,
     zrange_with_scores_to_pairs,
 )
 
@@ -117,3 +118,17 @@ def test_local_config_can_provide_ssh_alias(tmp_path, capsys):
 
 def test_load_local_config_missing_file_returns_empty_dict(tmp_path):
     assert load_local_config(str(tmp_path / "missing.json")) == {}
+
+
+def test_summarize_snapshot_counts_p0_surfaces():
+    snapshot = {
+        "box": {"redis_ping": "PONG", "uptime": "up 1 day"},
+        "devices": [{"fields": {"mac": "<mac>"}}],
+        "alarms": [{"alarm": {"type": "ALARM_GAME", "state": "active"}}],
+        "flows": [{"value": {"dp": 443, "pr": "tcp", "fd": "in"}}],
+        "collection": {"redacted": True},
+    }
+    summary = summarize_snapshot(snapshot)
+    assert summary["counts"] == {"devices": 1, "alarms": 1, "flows": 1}
+    assert summary["alarm_types"] == {"ALARM_GAME": 1}
+    assert summary["flow_top_ports"] == {"443": 1}
