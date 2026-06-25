@@ -30,6 +30,7 @@
 - Added `cluster` command for read-only alarm actionability clusters and ignore recommendations.
 - Updated local Chinese report with alarm cluster results and guidance against using network rules as the default alert-noise solution.
 - Fixed alarm archive time-window filtering: `--since-days` now filters by `_alarm:<aid>` payload `timestamp` / `alarmTimestamp` instead of trusting Redis sorted-set scores. Added `--candidate-limit` to bound candidate IDs before payload filtering.
+- Added stable anonymous token redaction plus `device-summary` and `attribute` commands. Live attribution shows most recent alarm volume can be reduced to a small anonymous device set before human review.
 
 ## Lessons Learned
 

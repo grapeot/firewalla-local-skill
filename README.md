@@ -104,6 +104,8 @@ Current commands:
 6. `dump-format`: bounded local raw/redacted dump for format discovery
 7. `summary`: compact JSON situation summary from a snapshot or live bounded read
 8. `cluster`: redacted alarm clustering with read-only ignore recommendations
+9. `device-summary`: current-vs-historical device inventory cleanup
+10. `attribute`: redacted alarm-to-device attribution with stable anonymous IDs
 
 Local format dump:
 
@@ -138,6 +140,13 @@ Cluster recent alarms:
 
 ```bash
 firewalla-skill cluster --alarms reports/alarms_last3d_latest.json --output reports/alarms_last3d_cluster.json
+```
+
+Summarize and attribute by anonymous device:
+
+```bash
+firewalla-skill device-summary --devices reports/devices_all_latest.json --output reports/devices_summary_latest.json
+firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
 ```
 
 ## Test Tiers

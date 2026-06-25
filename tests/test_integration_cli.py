@@ -70,3 +70,25 @@ def test_cluster_from_alarm_fixture_outputs_recommendations(capsys, tmp_path):
     payload = json.loads(capsys.readouterr().out)
     assert payload["clusters"]["by_category"] == {"routine_noise": 1}
     assert payload["recommendations"][0]["write_needed"] is False
+
+
+@pytest.mark.integration
+def test_device_summary_and_attribute_commands(capsys, tmp_path):
+    devices = tmp_path / "devices.json"
+    alarms = tmp_path / "alarms.json"
+    devices.write_text(
+        json.dumps({"devices": [{"fields": {"mac": "<mac:aaaaaaaaaa>", "lastActiveTimestamp": 200000}}], "collection": {"redacted": True}}),
+        encoding="utf-8",
+    )
+    alarms.write_text(
+        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "message": "<mac:aaaaaaaaaa>"}}], "collection": {"redacted": True}}),
+        encoding="utf-8",
+    )
+
+    assert main(["device-summary", "--devices", str(devices)]) == 0
+    device_summary = json.loads(capsys.readouterr().out)
+    assert device_summary["total_devices"] == 1
+
+    assert main(["attribute", "--alarms", str(alarms), "--devices", str(devices)]) == 0
+    attribution = json.loads(capsys.readouterr().out)
+    assert attribution["attributed_alarm_count"] == 1

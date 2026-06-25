@@ -174,6 +174,19 @@ The output includes cluster counts, type mapping, top active hours, and recommen
 
 Alert-noise handling should not default to creating network rules. Network rules change traffic behavior; most routine game/video alarms are notification or visibility noise. Future write support should first target official/app-supported alarm or notification tuning. Direct Redis writes are out of scope.
 
+## Stable Redaction And Device Attribution
+
+Redaction preserves stable anonymous tokens rather than replacing every sensitive value with a single placeholder. For example, a MAC address becomes `<mac:...>` and a device name-like field becomes `<bname:...>` or `<pname:...>`. The token is a short SHA-256 digest of the original value plus its kind.
+
+This allows safe local joins:
+
+```bash
+firewalla-skill device-summary --devices reports/devices_all_latest.json --output reports/devices_summary_latest.json
+firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
+```
+
+`attribute` uses token overlap between redacted alarm records and redacted device records. It does not need raw MAC addresses or device names. If an alarm lacks device tokens, it remains unattributed.
+
 ## Full Inventory And Alarm Windows
 
 The CLI must cover the common analysis question directly: all known devices and all alarms in a recent window. Agents should not need one-off scripts for this path.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,18 @@ SENSITIVE_STRING_KEYS = {
     "dhcpname",
     "uid",
 }
+
+MAC_PATTERN = re.compile(r"\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b")
+IPV4_PATTERN = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+IPV6_COMPRESSED_PATTERN = re.compile(r"\b[0-9a-fA-F]{0,4}::[0-9a-fA-F:]+(?:/\d{1,3})?\b")
+IPV6_FULL_PATTERN = re.compile(r"\b(?:[0-9a-fA-F]{1,4}:){3,}[0-9a-fA-F]{1,4}(?:/\d{1,3})?\b")
+DOMAIN_PATTERN = re.compile(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b")
+TOKEN_PATTERN = re.compile(r"<[^:>]+:[0-9a-f]{10}>")
+
+
+def stable_token(kind: str, value: object) -> str:
+    digest = hashlib.sha256(str(value).strip().lower().encode("utf-8")).hexdigest()[:10]
+    return f"<{kind}:{digest}>"
 
 
 @dataclass(frozen=True)
@@ -116,15 +129,11 @@ def redacted_command(command: Sequence[str]) -> list[str]:
 
 
 def redact_sensitive_text(text: str) -> str:
-    text = re.sub(r"\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b", "<mac>", text)
-    text = re.sub(
-        r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
-        "<ip>",
-        text,
-    )
-    text = re.sub(r"\b[0-9a-fA-F]{0,4}::[0-9a-fA-F:]+(?:/\d{1,3})?\b", "<ipv6>", text)
-    text = re.sub(r"\b(?:[0-9a-fA-F]{1,4}:){3,}[0-9a-fA-F]{1,4}(?:/\d{1,3})?\b", "<ipv6>", text)
-    text = re.sub(r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b", "<domain>", text)
+    text = MAC_PATTERN.sub(lambda match: stable_token("mac", match.group(0)), text)
+    text = IPV4_PATTERN.sub(lambda match: stable_token("ip", match.group(0)), text)
+    text = IPV6_COMPRESSED_PATTERN.sub(lambda match: stable_token("ipv6", match.group(0)), text)
+    text = IPV6_FULL_PATTERN.sub(lambda match: stable_token("ipv6", match.group(0)), text)
+    text = DOMAIN_PATTERN.sub(lambda match: stable_token("domain", match.group(0)), text)
     return text
 
 
@@ -143,7 +152,7 @@ def json_loads_maybe(value: str) -> object:
 def redacted_json_value(value: object, key_hint: str | None = None) -> object:
     if isinstance(value, str):
         if key_hint and key_hint.lower() in SENSITIVE_STRING_KEYS:
-            return f"<{key_hint.lower()}>"
+            return stable_token(key_hint.lower(), value)
         return redact_sensitive_text(value)
     if isinstance(value, list):
         return [redacted_json_value(item, key_hint=key_hint) for item in value]
@@ -406,6 +415,118 @@ def bucket_counts(values: Sequence[object]) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
 
+def extract_tokens(value: object) -> set[str]:
+    return set(TOKEN_PATTERN.findall(json.dumps(value, sort_keys=True)))
+
+
+def numeric_timestamp(value: object) -> float | None:
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def summarize_devices_payload(payload: dict[str, object], now: datetime | None = None) -> dict[str, object]:
+    devices = payload.get("devices") if isinstance(payload.get("devices"), list) else []
+    now_ts = (now or datetime.now(UTC)).timestamp()
+    activity: list[str] = []
+    detect_types: list[object] = []
+    last_from: list[object] = []
+    tokenized_devices = 0
+
+    for device in devices:
+        fields = device.get("fields") if isinstance(device, dict) and isinstance(device.get("fields"), dict) else {}
+        last_active = numeric_timestamp(fields.get("lastActiveTimestamp"))
+        if last_active is None:
+            activity.append("missing_last_active")
+        elif now_ts - last_active <= 24 * 60 * 60:
+            activity.append("active_24h")
+        elif now_ts - last_active <= 3 * 24 * 60 * 60:
+            activity.append("active_1_to_3d")
+        elif now_ts - last_active <= 30 * 24 * 60 * 60:
+            activity.append("inactive_3_to_30d")
+        else:
+            activity.append("inactive_over_30d")
+
+        detect = fields.get("detect")
+        if isinstance(detect, dict):
+            detect_types.append(detect.get("type"))
+        else:
+            detect_types.append(None)
+        last_from.append(fields.get("lastFrom"))
+        if extract_tokens(device):
+            tokenized_devices += 1
+
+    return redacted_json_value(
+        {
+            "total_devices": len(devices),
+            "activity_buckets": bucket_counts(activity),
+            "detect_types": bucket_counts(detect_types),
+            "last_from": bucket_counts(last_from),
+            "tokenized_devices": tokenized_devices,
+            "collection": payload.get("collection", {}),
+        }
+    )
+
+
+def attribute_alarms_to_devices(alarms_payload: dict[str, object], devices_payload: dict[str, object]) -> dict[str, object]:
+    alarms = alarms_payload.get("alarms") if isinstance(alarms_payload.get("alarms"), list) else []
+    devices = devices_payload.get("devices") if isinstance(devices_payload.get("devices"), list) else []
+
+    device_index: list[dict[str, object]] = []
+    for index, device in enumerate(devices):
+        tokens = extract_tokens(device)
+        primary = sorted(tokens)[0] if tokens else f"<device-index:{index}>"
+        device_index.append({"id": primary, "tokens": tokens})
+
+    attributed: dict[str, dict[str, object]] = {}
+    unattributed = 0
+    category_counts: list[str] = []
+    type_counts: list[str] = []
+
+    for alarm in alarms:
+        if not isinstance(alarm, dict):
+            continue
+        alarm_tokens = extract_tokens(alarm)
+        alarm_payload = alarm.get("alarm") if isinstance(alarm.get("alarm"), dict) else {}
+        alarm_type = str(alarm_payload.get("type") or "<missing>")
+        category = ALARM_CATEGORY.get(alarm_type, "unknown_review")
+        type_counts.append(alarm_type)
+        category_counts.append(category)
+
+        matches = [entry for entry in device_index if alarm_tokens & entry["tokens"]]
+        if not matches:
+            unattributed += 1
+            continue
+        # Attribute each alarm to the first matching anonymized device to avoid double counting.
+        device_id = str(matches[0]["id"])
+        item = attributed.setdefault(device_id, {"device_id": device_id, "alarm_count": 0, "categories": {}, "types": {}})
+        item["alarm_count"] = int(item["alarm_count"]) + 1
+        item["categories"][category] = item["categories"].get(category, 0) + 1
+        item["types"][alarm_type] = item["types"].get(alarm_type, 0) + 1
+
+    devices_ranked = sorted(attributed.values(), key=lambda item: (-int(item["alarm_count"]), str(item["device_id"])))
+    return redacted_json_value(
+        {
+            "total_alarms": len(alarms),
+            "total_devices": len(devices),
+            "attributed_alarm_count": sum(int(item["alarm_count"]) for item in devices_ranked),
+            "unattributed_alarm_count": unattributed,
+            "category_counts": bucket_counts(category_counts),
+            "type_counts": bucket_counts(type_counts),
+            "top_devices": devices_ranked[:20],
+            "limitations": [
+                "Attribution uses stable redacted token overlap, not raw MAC/device names.",
+                "If Firewalla alarm payloads omit device tokens, those alarms remain unattributed.",
+            ],
+            "collection": {
+                "alarms": alarms_payload.get("collection", {}),
+                "devices": devices_payload.get("collection", {}),
+            },
+        }
+    )
+
+
 def summarize_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
     devices = snapshot.get("devices") if isinstance(snapshot.get("devices"), list) else []
     alarms = snapshot.get("alarms") if isinstance(snapshot.get("alarms"), list) else []
@@ -475,6 +596,7 @@ ALARM_CATEGORY = {
     "ALARM_GAME": "routine_noise",
     "ALARM_VIDEO": "routine_noise",
     "ALARM_LARGE_UPLOAD": "review_bandwidth",
+    "ALARM_LARGE_UPLOAD_2": "review_bandwidth",
     "ALARM_ABNORMAL_BANDWIDTH_USAGE": "review_bandwidth",
     "ALARM_INTEL": "review_network_security",
     "ALARM_UPNP": "review_network_security",
@@ -737,6 +859,31 @@ def cmd_cluster(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_device_summary(args: argparse.Namespace) -> int:
+    loaded = load_json(args.devices)
+    if not isinstance(loaded, dict):
+        raise SystemExit("device-summary --devices input must be a JSON object")
+    summary = summarize_devices_payload(loaded)
+    if args.output:
+        write_json(Path(args.output), summary)
+    else:
+        print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_attribute(args: argparse.Namespace) -> int:
+    alarms = load_json(args.alarms)
+    devices = load_json(args.devices)
+    if not isinstance(alarms, dict) or not isinstance(devices, dict):
+        raise SystemExit("attribute inputs must be JSON objects")
+    attribution = attribute_alarms_to_devices(alarms, devices)
+    if args.output:
+        write_json(Path(args.output), attribution)
+    else:
+        print(json.dumps(attribution, indent=2, sort_keys=True))
+    return 0
+
+
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", help=f"local JSON config path; default: {LOCAL_CONFIG}")
     parser.add_argument("--ssh-alias", help="SSH config Host alias; defaults to FIREWALLA_SSH_ALIAS")
@@ -806,6 +953,17 @@ def build_parser() -> argparse.ArgumentParser:
     cluster.add_argument("--devices", help="optional redacted devices JSON; reserved for future stable anonymous joins")
     cluster.add_argument("--output", help="write cluster JSON to this path")
     cluster.set_defaults(func=cmd_cluster)
+
+    device_summary = subparsers.add_parser("device-summary", help="summarize redacted device inventory into current vs historical buckets")
+    device_summary.add_argument("--devices", required=True, help="redacted devices JSON from firewalla-skill devices --json")
+    device_summary.add_argument("--output", help="write device summary JSON to this path")
+    device_summary.set_defaults(func=cmd_device_summary)
+
+    attribute = subparsers.add_parser("attribute", help="attribute redacted alarms to anonymized devices using stable token overlap")
+    attribute.add_argument("--alarms", required=True, help="redacted alarms JSON from firewalla-skill alarms --json")
+    attribute.add_argument("--devices", required=True, help="redacted devices JSON from firewalla-skill devices --json")
+    attribute.add_argument("--output", help="write attribution JSON to this path")
+    attribute.set_defaults(func=cmd_attribute)
 
     return parser
 
