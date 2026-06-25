@@ -24,6 +24,8 @@ Successful use of this skill means:
 - Start read-only: box health, devices, alarms, flows, and statistics.
 - Do not create, delete, pause, or resume rules unless the user explicitly asks for a write operation.
 - Never print real tokens, box IDs, private device names, or flow records into public files.
+- Local JSON output is private by default so the user and their local AI can reason over real device names, IPs, MACs, domains, and alarm messages.
+- Use `--privacy redacted` only for artifacts intended for sharing, public docs, tests, issues, or PRs.
 - Keep live captures in `.firewalla_dumps/` or another git-ignored path.
 
 ## Optional MSP API Environment
@@ -83,11 +85,17 @@ Then summarize:
 firewalla-skill summary --input .firewalla_dumps/snapshot.json
 ```
 
-For full local report inputs, use the CLI instead of ad hoc SSH scripts:
+For full local report inputs, use the CLI instead of ad hoc SSH scripts. These outputs are private by default and belong in ignored `reports/`:
 
 ```bash
 firewalla-skill devices --execute --all --json --output reports/devices_all_latest.json
 firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
+```
+
+For a public-safe artifact, explicitly request redaction:
+
+```bash
+firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --privacy redacted --output reports/alarms_last3d_redacted.json
 ```
 
 Cluster alarms before recommending what to ignore:
@@ -109,7 +117,7 @@ When an attribution report surfaces an anonymous token that needs human verifica
 firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --output reports/device_resolve_latest.json
 ```
 
-Default resolution output is redacted and safe for AI analysis. Use `--include-private` only when the user needs real local fields like device name, IP, MAC, or local domain to find the device in Firewalla App, and write that output to ignored `reports/private_*.json`. If attribution points mostly to Firewalla itself, treat that as a parser bug or infrastructure-field match, not as a normal device finding.
+`resolve-device` is mainly for redacted artifacts or diagnostics. Private attribution reports should already include readable `device_summary` fields. If attribution points mostly to Firewalla itself, treat that as a parser bug or infrastructure-field match, not as a normal device finding.
 
 Do not recommend creating network rules merely to reduce alert noise. Prefer Firewalla alarm/notification tuning where available; traffic rules are for changing traffic behavior.
 

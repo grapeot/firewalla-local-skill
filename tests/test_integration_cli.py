@@ -15,7 +15,7 @@ def test_snapshot_dry_run_has_stable_top_level_schema(capsys, tmp_path):
     payload = json.loads(capsys.readouterr().out)
     assert payload["dry_run"] is True
     assert set(payload["snapshot"]) == {"box", "devices", "alarms", "flows", "flows_summary", "collection"}
-    assert payload["snapshot"]["collection"]["redacted"] is True
+    assert payload["snapshot"]["collection"]["privacy"] == "private"
 
 
 @pytest.mark.integration
@@ -46,6 +46,15 @@ def test_devices_all_json_dry_run(capsys, tmp_path):
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
     assert main(["devices", "--config", str(config), "--all", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dry_run"] is True
+
+
+@pytest.mark.integration
+def test_devices_json_redacted_dry_run(capsys, tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
+    assert main(["devices", "--config", str(config), "--all", "--json", "--privacy", "redacted"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["dry_run"] is True
 
@@ -92,6 +101,25 @@ def test_device_summary_and_attribute_commands(capsys, tmp_path):
     assert main(["attribute", "--alarms", str(alarms), "--devices", str(devices)]) == 0
     attribution = json.loads(capsys.readouterr().out)
     assert attribution["attributed_alarm_count"] == 1
+    assert attribution["top_devices"][0]["device_summary"]["mac"] == "<mac:aaaaaaaaaa>"
+
+
+@pytest.mark.integration
+def test_attribute_private_inputs_emit_readable_device_summary(capsys, tmp_path):
+    devices = tmp_path / "devices_private.json"
+    alarms = tmp_path / "alarms_private.json"
+    devices.write_text(
+        json.dumps({"devices": [{"fields": {"bname": "Game PC", "mac": "aa:bb:cc:dd:ee:ff", "ipv4Addr": "192.0.2.42"}}], "collection": {"privacy": "private"}}),
+        encoding="utf-8",
+    )
+    alarms.write_text(
+        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "p.device.mac": "aa:bb:cc:dd:ee:ff"}}], "collection": {"privacy": "private"}}),
+        encoding="utf-8",
+    )
+    assert main(["attribute", "--alarms", str(alarms), "--devices", str(devices)]) == 0
+    attribution = json.loads(capsys.readouterr().out)
+    assert attribution["top_devices"][0]["device_id"] == "Game PC"
+    assert attribution["top_devices"][0]["device_summary"]["ipv4Addr"] == "192.0.2.42"
 
 
 @pytest.mark.integration

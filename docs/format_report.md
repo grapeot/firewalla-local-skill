@@ -71,7 +71,7 @@ Representative sanitized fields:
 
 Product value: flows are necessary for answering what changed and what generated traffic. They are P0 because the feature must exist, even if the user later chooses not to inspect detailed flows.
 
-Privacy rule: default output should be bounded and redacted. Full raw flow export should remain local-only.
+Privacy rule: default local output can remain private because it is written to ignored local artifact paths. Use redacted output only for shareable/public artifacts. Full raw flow export should remain local-only.
 
 ## First Snapshot Shape
 
@@ -98,5 +98,5 @@ This shape is intentionally compact. It gives an agent enough structure to reaso
 1. `devices` should become the canonical local entity table.
 2. `alarms` should drive first-pass narrative summaries because they are high-signal and already classified by Firewalla.
 3. `flows` should stay bounded by default and should grow aggregate summaries before full-detail export.
-4. `snapshot` should remain redacted by default; raw local dump should remain a separate `dump-format` workflow.
+4. `snapshot` should remain bounded by default; use `--privacy redacted` for public-safe artifacts. Raw local dump should remain a separate `dump-format` workflow.
 5. Future rule/policy reads should join against device and alarm context, but write operations remain out of MVP.
