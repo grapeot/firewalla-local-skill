@@ -1,0 +1,29 @@
+# Working Log
+
+## Changelog
+
+### 2026-06-24
+
+- Scaffolded public-ready Firewalla skill project.
+- Initially considered official Firewalla MSP API first.
+- Updated direction after plan check: MSP Lite does not appear to include API/Integration; MVP should be local-first instead.
+- Investigated Firewalla public source and community projects. Found viable no-subscription paths: SSH + Redis read-only collector for MVP; `ccpk1/firewalla-local-ha` Additional Pairing + encrypted local runtime protocol for V2.
+- Added PRD/RFC/test docs, root skill, `.env.example`, `.gitignore`, and project rules.
+- Current implementation recommendation: start with SSH + Redis read-only collector, then consider local Encipher runtime protocol if richer control is needed.
+- Added an initial Python CLI skeleton with dry-run-first SSH/Redis commands: `health`, `devices`, `alarms`, and `flows`.
+- Added offline tests for read-only Redis command construction, mutation rejection, redaction, and dry-run output. `python -m pytest -q` passes with 5 tests.
+- Added SSH config alias support through `--ssh-alias` / `FIREWALLA_SSH_ALIAS`, so an existing `ssh firewall` setup can be reused without copying host/user/key into project config.
+- Live read-only health check succeeded with the `firewalla` SSH alias: `hostname`, `uptime`, and `redis-cli PING` returned successfully.
+- Added git-ignored `.firewalla.local.json` support so local target config can live outside public repo files.
+- Promoted flows into P0 per product direction.
+- Added `snapshot` and `dump-format` CLI commands for bounded redacted JSON artifacts and local-only raw format dumps.
+- Added three test tiers: unit, offline integration, and opt-in live tests.
+- Ran bounded live format dump and wrote sanitized findings to `docs/format_report.md`.
+
+## Lessons Learned
+
+- Official API exists but appears paid-gated from Professional upward.
+- Do not start from desktop cookie or Playwright reverse engineering while SSH/local sidecar options remain unexplored.
+- Firewalla public source confirms Redis key patterns for hosts (`host:mac:*`), flows (`flow:conn:*` / `flow:local:*`), and alarms (`alarm_active`, `_alarm:*`, `_alarmDetail:*`).
+- The local HA project confirms a richer local protocol over `http://{local_ip}:8833/v1/encipher/message/{gid}`, but it requires high-trust local credential handling.
+- The CLI defaults to dry-run and requires `--execute` before connecting to a real box.

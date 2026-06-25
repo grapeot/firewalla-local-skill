@@ -1,0 +1,38 @@
+{
+  "alarms": [
+    {
+      "alarm": {
+        "type": "ALARM_INTEL",
+        "ts": "1700000000"
+      },
+      "detail": {},
+      "id": "1"
+    }
+  ],
+  "box": {
+    "hostname": "Firewalla",
+    "redis_ping": "PONG",
+    "uptime": "up 1 day"
+  },
+  "collection": {
+    "generated_at": "2026-01-01T00:00:00+00:00",
+    "limit": 1,
+    "redacted": true,
+    "source": "ssh_redis"
+  },
+  "devices": [
+    {
+      "fields": {
+        "ipv4Addr": "<local-ip>",
+        "mac": "<mac>",
+        "name": "Example Device"
+      },
+      "redis_key": "host:mac:<mac>"
+    }
+  ],
+  "flows": [],
+  "flows_summary": {
+    "sample_count": 0,
+    "source_key": "flow:conn:system"
+  }
+}

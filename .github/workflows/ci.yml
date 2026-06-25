@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install package
+        run: uv sync --extra dev
+      - name: Run unit and offline integration tests
+        run: uv run pytest -q -m "not live"
+      - name: Privacy scan
+        run: |
+          ! rg -n "op://|BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY|FIREWALLA_MSP_TOKEN=[A-Za-z0-9_-]{16,}|192\.168\.|10\.[0-9]+\.[0-9]+\.[0-9]+|172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]+\.[0-9]+" . --glob '!README.md' --glob '!docs/**' --glob '!tests/**' --glob '!.env.example'
