@@ -96,6 +96,13 @@ Cluster alarms before recommending what to ignore:
 firewalla-skill cluster --alarms reports/alarms_last3d_latest.json --output reports/alarms_last3d_cluster.json
 ```
 
+Clean up device scope and attribute alarms before giving user-facing advice:
+
+```bash
+firewalla-skill device-summary --devices reports/devices_all_latest.json --output reports/devices_summary_latest.json
+firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
+```
+
 Do not recommend creating network rules merely to reduce alert noise. Prefer Firewalla alarm/notification tuning where available; traffic rules are for changing traffic behavior.
 
 For format discovery, prefer:

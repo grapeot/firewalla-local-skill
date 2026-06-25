@@ -48,6 +48,7 @@ The CLI should therefore prioritize facts that help an agent answer household-ne
 3. Which devices or flows changed recently in a way that looks unusual?
 4. Is the Firewalla box healthy enough that its observations are trustworthy?
 5. What policies/rules exist, but only as read-only context for now?
+6. Which small set of anonymous devices explains most alert volume?
 
 ## Information Priority
 
@@ -106,6 +107,17 @@ The first stable output should be a compact object with these top-level sections
 ```
 
 This is intentionally smaller than Firewalla's raw data. The product should preserve the fields needed for AI reasoning and hide fields that only increase privacy risk.
+
+## Device Cleanup And Attribution
+
+The MVP should treat device cleanup and alarm attribution as first-class read-only analysis. Redaction must preserve stable anonymous tokens, such as `<mac:...>` or `<bname:...>`, so reports can join devices and alarms without exposing raw identifiers.
+
+Required outputs:
+
+1. current-vs-historical device buckets by last active timestamp
+2. device type distribution and missing classification count
+3. alarm counts attributed to anonymous device IDs
+4. top noisy devices and top review-worthy devices
 
 ## Open Questions
 

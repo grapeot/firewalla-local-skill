@@ -18,6 +18,8 @@ Use fake fixtures and dry-runs for:
 5. redaction of SSH key paths, hosts, MACs, and local IPs
 6. git-ignored local JSON config loading
 7. alarm time-window filtering by payload timestamp instead of Redis sorted-set score
+8. stable anonymous token redaction for safe joins
+9. device-summary and alarm-to-device attribution outputs
 
 ## Live Tests
 
@@ -37,6 +39,8 @@ Or a git-ignored `.firewalla.local.json` with `ssh_alias`.
 Live tests must start with `firewalla-skill health --execute` only. Any write operation needs a separate RFC and opt-in flag.
 
 Live read-only alarm tests must cover `alarms --since-days 3 --include-archive --all --json` to verify active/archive candidate collection and payload timestamp filtering.
+
+Live read-only report tests must cover `device-summary` and `attribute` on live redacted artifacts to verify device cleanup and alarm attribution remain usable without raw identifiers.
 
 Optional MSP API tests are separate and only apply when a paid MSP token is available.
 

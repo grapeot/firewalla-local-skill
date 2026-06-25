@@ -5,6 +5,7 @@ import pytest
 
 from firewalla_skill.cli import (
     SshTarget,
+    attribute_alarms_to_devices,
     build_redis_command,
     build_redis_raw_command,
     build_ssh_command,
@@ -15,6 +16,8 @@ from firewalla_skill.cli import (
     pair_lines_to_dict,
     redact_sensitive_text,
     redacted_command,
+    stable_token,
+    summarize_devices_payload,
     summarize_snapshot,
     zrange_with_scores_to_pairs,
 )
@@ -79,7 +82,8 @@ def test_ssh_alias_uses_config_destination_without_user_or_port():
 
 def test_redact_sensitive_text_masks_local_network_identifiers():
     text = "device aa:bb:cc:dd:ee:ff at 192.0.2.42 and 52.1.2.3 calling example.test via fe80::1/64"
-    assert redact_sensitive_text(text) == "device <mac> at <ip> and <ip> calling <domain> via <ipv6>"
+    assert "aa:bb:cc:dd:ee:ff" not in redact_sensitive_text(text)
+    assert stable_token("mac", "aa:bb:cc:dd:ee:ff") in redact_sensitive_text(text)
 
 
 def test_redact_sensitive_text_does_not_mask_uptime_clock():
@@ -153,6 +157,36 @@ def test_cluster_alarms_payload_classifies_actionability():
         "routine_noise": 1,
     }
     assert clustered["ignore_guidance"]["create_network_rules_for_alert_noise"] is False
+
+
+def test_summarize_devices_payload_buckets_activity():
+    payload = {
+        "devices": [
+            {"fields": {"lastActiveTimestamp": 200000 - 60, "detect": {"type": "phone"}, "mac": stable_token("mac", "a")}},
+            {"fields": {"lastActiveTimestamp": 200000 - 2 * 24 * 3600, "detect": {"type": "desktop"}}},
+            {"fields": {"lastActiveTimestamp": 200000 - 40 * 24 * 3600}},
+        ],
+        "collection": {"redacted": True},
+    }
+    summary = summarize_devices_payload(payload, now=datetime.fromtimestamp(200000, UTC))
+    assert summary["activity_buckets"] == {"active_1_to_3d": 1, "active_24h": 1, "inactive_over_30d": 1}
+    assert summary["detect_types"] == {"<missing>": 1, "desktop": 1, "phone": 1}
+
+
+def test_attribute_alarms_to_devices_uses_stable_tokens():
+    mac_token = stable_token("mac", "aa:bb:cc:dd:ee:ff")
+    devices = {"devices": [{"fields": {"mac": mac_token, "lastActiveTimestamp": 1}}], "collection": {"redacted": True}}
+    alarms = {
+        "alarms": [
+            {"alarm": {"type": "ALARM_GAME", "message": f"seen on {mac_token}"}},
+            {"alarm": {"type": "ALARM_INTEL", "message": "no matching token"}},
+        ],
+        "collection": {"redacted": True},
+    }
+    attribution = attribute_alarms_to_devices(alarms, devices)
+    assert attribution["attributed_alarm_count"] == 1
+    assert attribution["unattributed_alarm_count"] == 1
+    assert attribution["top_devices"][0]["categories"] == {"routine_noise": 1}
 
 
 def test_filter_alarms_since_uses_payload_timestamp_not_source_score():

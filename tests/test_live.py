@@ -58,3 +58,18 @@ def test_live_all_devices_and_recent_alarms_json(tmp_path):
     assert isinstance(alarms_payload["alarms"], list)
     assert devices_payload["collection"]["all"] is True
     assert alarms_payload["collection"]["since_days"] == 3
+
+
+@pytest.mark.skipif(not live_enabled(), reason="set FIREWALLA_LIVE_TESTS=1 for live Firewalla tests")
+def test_live_device_summary_and_attribution(tmp_path):
+    devices = tmp_path / "devices.json"
+    alarms = tmp_path / "alarms.json"
+    device_summary = tmp_path / "device_summary.json"
+    attribution = tmp_path / "attribution.json"
+    assert main(["devices", "--execute", "--all", "--json", "--output", str(devices)]) == 0
+    assert main(["alarms", "--execute", "--since-days", "3", "--include-archive", "--all", "--json", "--output", str(alarms)]) == 0
+    assert main(["device-summary", "--devices", str(devices), "--output", str(device_summary)]) == 0
+    assert main(["attribute", "--alarms", str(alarms), "--devices", str(devices), "--output", str(attribution)]) == 0
+    assert json.loads(device_summary.read_text(encoding="utf-8"))["total_devices"] >= 0
+    payload = json.loads(attribution.read_text(encoding="utf-8"))
+    assert set(payload) >= {"total_alarms", "attributed_alarm_count", "unattributed_alarm_count", "top_devices"}
