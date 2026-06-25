@@ -111,6 +111,8 @@ firewalla-skill device-summary --devices reports/devices_all_latest.json --outpu
 firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
 ```
 
+When reading attribution output, prefer `device_summary.name`, `dhcpName`, `localDomain`, or `sambaName` over stale `bname` / `bonjourName` aliases. If `identity_conflict` is present, report the current name and mention the stale alias separately.
+
 When an attribution report surfaces an anonymous token that needs human verification, resolve it before asking the user to manually hunt through the app:
 
 ```bash
