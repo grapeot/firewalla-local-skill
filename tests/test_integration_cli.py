@@ -92,3 +92,22 @@ def test_device_summary_and_attribute_commands(capsys, tmp_path):
     assert main(["attribute", "--alarms", str(alarms), "--devices", str(devices)]) == 0
     attribution = json.loads(capsys.readouterr().out)
     assert attribution["attributed_alarm_count"] == 1
+
+
+@pytest.mark.integration
+def test_resolve_device_dry_run_defaults_to_redacted(capsys, tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
+    assert main(["resolve-device", "--config", str(config), "--token", "<bname:aaaaaaaaaa>"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dry_run"] is True
+    assert payload["redacted"] is True
+
+
+@pytest.mark.integration
+def test_resolve_device_dry_run_can_request_private_fields(capsys, tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
+    assert main(["resolve-device", "--config", str(config), "--token", "<bname:aaaaaaaaaa>", "--include-private"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["private_fields_included"] is True

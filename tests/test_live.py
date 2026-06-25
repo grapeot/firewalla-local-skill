@@ -73,3 +73,8 @@ def test_live_device_summary_and_attribution(tmp_path):
     assert json.loads(device_summary.read_text(encoding="utf-8"))["total_devices"] >= 0
     payload = json.loads(attribution.read_text(encoding="utf-8"))
     assert set(payload) >= {"total_alarms", "attributed_alarm_count", "unattributed_alarm_count", "top_devices"}
+
+
+@pytest.mark.skipif(not live_enabled(), reason="set FIREWALLA_LIVE_TESTS=1 for live Firewalla tests")
+def test_live_resolve_device_dry_run_only():
+    assert main(["resolve-device", "--token", "<bname:aaaaaaaaaa>"]) == 0

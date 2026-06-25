@@ -105,6 +105,7 @@ Initial commands:
 6. `firewalla-skill dump-format`: collect bounded examples for P0 surfaces into a git-ignored local artifact
 7. `firewalla-skill snapshot`: emit a redacted AI-readable JSON snapshot for box, devices, alarms, flows, and collection metadata
 8. `firewalla-skill summary`: emit a compact JSON situation summary from an existing snapshot or live bounded read
+9. `firewalla-skill resolve-device`: resolve an anonymous token back to matching device records; default output is redacted, with an explicit `--include-private` reveal mode
 
 The command builder enforces a Redis read-only allowlist. Mutation commands such as `SET` are rejected before execution.
 
@@ -186,6 +187,8 @@ firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices r
 ```
 
 `attribute` uses token overlap between redacted alarm records and redacted device records. It does not need raw MAC addresses or device names. If an alarm lacks device tokens, it remains unattributed.
+
+`resolve-device` closes the human review loop after attribution identifies a top anonymous token. The capability is public and generally useful: every user needs to map anonymous findings back to devices they can inspect in the Firewalla App. The privacy boundary is at the output mode, not at the feature boundary. Default output is redacted JSON, so an AI agent can reason about match count, matched fields, and stable tokens without seeing real local identifiers. `--include-private` emits real local fields such as name, IP, MAC, and local domain for the user's own machine; agents should write that output only to git-ignored paths such as `reports/private_*.json`.
 
 ## Full Inventory And Alarm Windows
 

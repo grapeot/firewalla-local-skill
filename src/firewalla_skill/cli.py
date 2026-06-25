@@ -58,6 +58,48 @@ def stable_token(kind: str, value: object) -> str:
     return f"<{kind}:{digest}>"
 
 
+def field_tokens(field: str, value: object) -> set[str]:
+    text = str(value)
+    tokens = {stable_token(field.lower(), text)}
+    if MAC_PATTERN.search(text):
+        tokens.add(stable_token("mac", text))
+    if IPV4_PATTERN.search(text):
+        tokens.add(stable_token("ip", text))
+    if IPV6_COMPRESSED_PATTERN.search(text) or IPV6_FULL_PATTERN.search(text):
+        tokens.add(stable_token("ipv6", text))
+    if DOMAIN_PATTERN.search(text):
+        tokens.add(stable_token("domain", text))
+    return tokens
+
+
+def device_matches_token(fields: dict[str, object], token: str) -> list[str]:
+    return [field for field, value in fields.items() if token in field_tokens(field, value)]
+
+
+def resolve_device_payload(token: str, matches: list[dict[str, object]], include_private: bool = False) -> dict[str, object]:
+    output_matches: list[dict[str, object]] = []
+    for match in matches:
+        fields = match.get("fields") if isinstance(match.get("fields"), dict) else {}
+        output_matches.append(
+            {
+                "redis_key": match.get("redis_key") if include_private else redact_sensitive_text(str(match.get("redis_key", ""))),
+                "matched_fields": match.get("matched_fields", []),
+                "fields": fields if include_private else redacted_json_value(fields),
+            }
+        )
+    return {
+        "token": token,
+        "match_count": len(matches),
+        "matches": output_matches,
+        "collection": {
+            "source": "ssh_redis",
+            "read_only": True,
+            "redacted": not include_private,
+            "private_fields_included": include_private,
+        },
+    }
+
+
 @dataclass(frozen=True)
 class SshTarget:
     host: str | None = None
@@ -884,6 +926,59 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resolve_device(args: argparse.Namespace) -> int:
+    target = env_target(args)
+    remote = "keys=$(redis-cli --raw --scan --pattern 'host:mac:*'); for key in $keys; do echo __FIREWALLA_KEY__$key; redis-cli --raw HGETALL \"$key\"; done"
+    if not args.execute:
+        command = build_ssh_command(target, remote)
+        print(
+            json.dumps(
+                {
+                    "dry_run": True,
+                    "command": redacted_command(command),
+                    "redacted": not args.include_private,
+                    "private_fields_included": args.include_private,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    code, stdout, stderr, command = capture_remote(target, remote, execute=True)
+    if code != 0:
+        if stderr:
+            print(redact_sensitive_text(stderr), file=sys.stderr)
+        return code
+
+    matches: list[dict[str, object]] = []
+    current_key: str | None = None
+    current_lines: list[str] = []
+    for line in split_lines(stdout):
+        if line.startswith("__FIREWALLA_KEY__"):
+            if current_key:
+                fields = pair_lines_to_dict(current_lines)
+                matched_fields = device_matches_token(fields, args.token)
+                if matched_fields:
+                    matches.append({"redis_key": current_key, "fields": fields, "matched_fields": matched_fields})
+            current_key = line.removeprefix("__FIREWALLA_KEY__")
+            current_lines = []
+        else:
+            current_lines.append(line)
+    if current_key:
+        fields = pair_lines_to_dict(current_lines)
+        matched_fields = device_matches_token(fields, args.token)
+        if matched_fields:
+            matches.append({"redis_key": current_key, "fields": fields, "matched_fields": matched_fields})
+
+    output = resolve_device_payload(args.token, matches, include_private=args.include_private)
+    if args.output:
+        write_json(Path(args.output), output)
+    else:
+        print(json.dumps(output, indent=2, sort_keys=True))
+    return 0
+
+
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", help=f"local JSON config path; default: {LOCAL_CONFIG}")
     parser.add_argument("--ssh-alias", help="SSH config Host alias; defaults to FIREWALLA_SSH_ALIAS")
@@ -964,6 +1059,13 @@ def build_parser() -> argparse.ArgumentParser:
     attribute.add_argument("--devices", required=True, help="redacted devices JSON from firewalla-skill devices --json")
     attribute.add_argument("--output", help="write attribution JSON to this path")
     attribute.set_defaults(func=cmd_attribute)
+
+    resolve_device = subparsers.add_parser("resolve-device", help="resolve an anonymous token to matching Firewalla device records")
+    add_common_args(resolve_device)
+    resolve_device.add_argument("--token", required=True, help="stable anonymous token, for example <bname:...>")
+    resolve_device.add_argument("--include-private", action="store_true", help="include real local device fields instead of redacted tokens")
+    resolve_device.add_argument("--output", help="write JSON output to this path")
+    resolve_device.set_defaults(func=cmd_resolve_device)
 
     return parser
 

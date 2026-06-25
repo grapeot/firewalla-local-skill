@@ -106,6 +106,7 @@ Current commands:
 8. `cluster`: redacted alarm clustering with read-only ignore recommendations
 9. `device-summary`: current-vs-historical device inventory cleanup
 10. `attribute`: redacted alarm-to-device attribution with stable anonymous IDs
+11. `resolve-device`: map an anonymous device token to matching device records, redacted by default
 
 Local format dump:
 
@@ -147,6 +148,18 @@ Summarize and attribute by anonymous device:
 ```bash
 firewalla-skill device-summary --devices reports/devices_all_latest.json --output reports/devices_summary_latest.json
 firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
+```
+
+Resolve a top anonymous device from an attribution report:
+
+```bash
+firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --output reports/device_resolve_latest.json
+```
+
+By default this remains redacted and suitable for AI analysis. To locate the device in your own Firewalla App, explicitly include private local fields and keep the output in ignored `reports/`:
+
+```bash
+firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --include-private --output reports/private_device_resolve_latest.json
 ```
 
 ## Test Tiers

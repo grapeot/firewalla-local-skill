@@ -103,6 +103,14 @@ firewalla-skill device-summary --devices reports/devices_all_latest.json --outpu
 firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
 ```
 
+When an attribution report surfaces a top anonymous token, resolve it before asking the user to manually hunt through the app:
+
+```bash
+firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --output reports/device_resolve_latest.json
+```
+
+Default resolution output is redacted and safe for AI analysis. Use `--include-private` only when the user needs real local fields like device name, IP, MAC, or local domain to find the device in Firewalla App, and write that output to ignored `reports/private_*.json`.
+
 Do not recommend creating network rules merely to reduce alert noise. Prefer Firewalla alarm/notification tuning where available; traffic rules are for changing traffic behavior.
 
 For format discovery, prefer:
