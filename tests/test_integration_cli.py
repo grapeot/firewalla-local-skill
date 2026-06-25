@@ -81,7 +81,7 @@ def test_device_summary_and_attribute_commands(capsys, tmp_path):
         encoding="utf-8",
     )
     alarms.write_text(
-        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "message": "<mac:aaaaaaaaaa>"}}], "collection": {"redacted": True}}),
+        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "p.device.mac": "<mac:aaaaaaaaaa>"}}], "collection": {"redacted": True}}),
         encoding="utf-8",
     )
 

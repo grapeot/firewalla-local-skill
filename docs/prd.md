@@ -116,8 +116,12 @@ Required outputs:
 
 1. current-vs-historical device buckets by last active timestamp
 2. device type distribution and missing classification count
-3. alarm counts attributed to anonymous device IDs
+3. alarm counts attributed to anonymous device IDs using Firewalla source fields, not arbitrary token overlap
 4. top noisy devices and top review-worthy devices
+
+Alarm attribution must preserve Firewalla payload semantics. Source/client fields such as `device`, `p.device.id`, `p.device.ip`, `p.device.mac`, `p.device.name`, and `p.flows[].device` are candidates for device attribution. Infrastructure/interface fields such as `p.intf.id`, `p.intf.name`, `p.intf.subnet`, and `p.intf.subnet6` describe where Firewalla observed the event; they must not cause an alarm to be attributed to the Firewalla gateway itself.
+
+`resolve-device` is a diagnostic and human lookup helper. It is useful when a user wants to map an anonymous token to a local Firewalla App-visible record, but it is not the primary mechanism for understanding alarm source. If attribution frequently points to Firewalla itself, the parser is likely using the wrong alarm fields.
 
 ## Open Questions
 

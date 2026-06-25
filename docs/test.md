@@ -20,6 +20,8 @@ Use fake fixtures and dry-runs for:
 7. alarm time-window filtering by payload timestamp instead of Redis sorted-set score
 8. stable anonymous token redaction for safe joins
 9. device-summary and alarm-to-device attribution outputs
+10. preservation of Firewalla schema keys such as `p.device.ip` while redacting sensitive values
+11. source-aware alarm attribution that uses `p.device.*` / `p.flows[].device` and excludes `p.intf.*` infrastructure fields
 
 ## Live Tests
 
@@ -40,7 +42,7 @@ Live tests must start with `firewalla-skill health --execute` only. Any write op
 
 Live read-only alarm tests must cover `alarms --since-days 3 --include-archive --all --json` to verify active/archive candidate collection and payload timestamp filtering.
 
-Live read-only report tests must cover `device-summary` and `attribute` on live redacted artifacts to verify device cleanup and alarm attribution remain usable without raw identifiers.
+Live read-only report tests must cover `device-summary` and `attribute` on live redacted artifacts to verify device cleanup and source-aware alarm attribution remain usable without raw identifiers.
 
 Optional MSP API tests are separate and only apply when a paid MSP token is available.
 

@@ -11,6 +11,7 @@ from firewalla_skill.cli import (
     build_ssh_command,
     cluster_alarms_payload,
     device_matches_token,
+    extract_alarm_source_tokens,
     field_tokens,
     filter_alarms_since,
     main,
@@ -102,6 +103,16 @@ def test_pair_lines_to_dict_parses_json_values():
     }
 
 
+def test_redacted_json_value_preserves_schema_keys():
+    from firewalla_skill.cli import redacted_json_value
+
+    redacted = redacted_json_value({"p.device.ip": "192.0.2.42", "p.intf.subnet": "192.0.2.1/24"})
+    assert "p.device.ip" in redacted
+    assert "p.intf.subnet" in redacted
+    assert redacted["p.device.ip"] == stable_token("ip", "192.0.2.42")
+    assert redacted_json_value({"device": "aa:bb:cc:dd:ee:ff"})["device"] == stable_token("mac", "aa:bb:cc:dd:ee:ff")
+
+
 def test_zrange_with_scores_to_pairs_parses_scores_and_json_values():
     assert zrange_with_scores_to_pairs(['{"dest":"example.test"}', "1700000000"]) == [
         {"value": {"dest": "example.test"}, "score": 1700000000.0}
@@ -181,7 +192,7 @@ def test_attribute_alarms_to_devices_uses_stable_tokens():
     devices = {"devices": [{"fields": {"mac": mac_token, "lastActiveTimestamp": 1}}], "collection": {"redacted": True}}
     alarms = {
         "alarms": [
-            {"alarm": {"type": "ALARM_GAME", "message": f"seen on {mac_token}"}},
+            {"alarm": {"type": "ALARM_GAME", "p.device.mac": mac_token}},
             {"alarm": {"type": "ALARM_INTEL", "message": "no matching token"}},
         ],
         "collection": {"redacted": True},
@@ -190,6 +201,16 @@ def test_attribute_alarms_to_devices_uses_stable_tokens():
     assert attribution["attributed_alarm_count"] == 1
     assert attribution["unattributed_alarm_count"] == 1
     assert attribution["top_devices"][0]["categories"] == {"routine_noise": 1}
+    assert "p.device.*" in attribution["limitations"][0]
+
+
+def test_alarm_source_tokens_exclude_firewalla_interface_fields():
+    device_token = stable_token("mac", "aa:bb:cc:dd:ee:ff")
+    gateway_token = stable_token("ip", "192.0.2.1")
+    alarm = {"alarm": {"p.device.mac": device_token, "p.intf.subnet": f"{gateway_token}/24", "p.flows": [{"device": device_token}]}}
+    tokens = extract_alarm_source_tokens(alarm)
+    assert device_token in tokens
+    assert gateway_token not in tokens
 
 
 def test_field_tokens_supports_private_lookup():

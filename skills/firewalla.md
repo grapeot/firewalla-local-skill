@@ -96,20 +96,20 @@ Cluster alarms before recommending what to ignore:
 firewalla-skill cluster --alarms reports/alarms_last3d_latest.json --output reports/alarms_last3d_cluster.json
 ```
 
-Clean up device scope and attribute alarms before giving user-facing advice:
+Clean up device scope and attribute alarms before giving user-facing advice. Attribution should use source-like alarm fields such as `p.device.*` and exclude `p.intf.*` infrastructure fields, which describe the Firewalla interface rather than the client device:
 
 ```bash
 firewalla-skill device-summary --devices reports/devices_all_latest.json --output reports/devices_summary_latest.json
 firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
 ```
 
-When an attribution report surfaces a top anonymous token, resolve it before asking the user to manually hunt through the app:
+When an attribution report surfaces an anonymous token that needs human verification, resolve it before asking the user to manually hunt through the app:
 
 ```bash
 firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --output reports/device_resolve_latest.json
 ```
 
-Default resolution output is redacted and safe for AI analysis. Use `--include-private` only when the user needs real local fields like device name, IP, MAC, or local domain to find the device in Firewalla App, and write that output to ignored `reports/private_*.json`.
+Default resolution output is redacted and safe for AI analysis. Use `--include-private` only when the user needs real local fields like device name, IP, MAC, or local domain to find the device in Firewalla App, and write that output to ignored `reports/private_*.json`. If attribution points mostly to Firewalla itself, treat that as a parser bug or infrastructure-field match, not as a normal device finding.
 
 Do not recommend creating network rules merely to reduce alert noise. Prefer Firewalla alarm/notification tuning where available; traffic rules are for changing traffic behavior.
 
