@@ -39,3 +39,21 @@ def test_summary_from_fixture_outputs_ai_contract(capsys):
     assert payload["counts"] == {"alarms": 1, "devices": 1, "flows": 0}
     assert payload["alarm_types"] == {"ALARM_INTEL": 1}
     assert payload["collection"]["redacted"] is True
+
+
+@pytest.mark.integration
+def test_devices_all_json_dry_run(capsys, tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
+    assert main(["devices", "--config", str(config), "--all", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dry_run"] is True
+
+
+@pytest.mark.integration
+def test_alarms_since_days_json_dry_run(capsys, tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
+    assert main(["alarms", "--config", str(config), "--since-days", "3", "--include-archive", "--all", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dry_run"] is True

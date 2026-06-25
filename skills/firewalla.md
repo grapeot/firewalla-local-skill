@@ -83,6 +83,13 @@ Then summarize:
 firewalla-skill summary --input .firewalla_dumps/snapshot.json
 ```
 
+For full local report inputs, use the CLI instead of ad hoc SSH scripts:
+
+```bash
+firewalla-skill devices --execute --all --json --output reports/devices_all_latest.json
+firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
+```
+
 For format discovery, prefer:
 
 ```bash

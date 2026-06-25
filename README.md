@@ -97,8 +97,8 @@ Add `--execute` only when running against your own box. The CLI is dry-run by de
 Current commands:
 
 1. `health`: `hostname`, `uptime`, and a safe Redis `PING` probe
-2. `devices`: Redis `SCAN` for `host:mac:*`
-3. `alarms`: Redis `ZREVRANGE alarm_active`
+2. `devices`: Redis device records from `host:mac:*`, including `--all --json`
+3. `alarms`: active/recent alarm records, including `--since-days` and `--include-archive --json`
 4. `flows`: Redis `ZREVRANGE` for `flow:conn:system` or a MAC-specific flow key
 5. `snapshot`: bounded redacted JSON snapshot for AI reasoning
 6. `dump-format`: bounded local raw/redacted dump for format discovery
@@ -124,6 +124,13 @@ Live bounded summary:
 
 ```bash
 firewalla-skill summary --execute --limit 5
+```
+
+All devices and last-three-days alarms:
+
+```bash
+firewalla-skill devices --execute --all --json --output reports/devices_all_latest.json
+firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
 ```
 
 ## Test Tiers
