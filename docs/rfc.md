@@ -1,239 +1,146 @@
-# RFC: Firewalla Skill Architecture
+中文版本：见 [rfc.zh.md](rfc.zh.md).
 
-## Decision
+# Firewalla Local Skill — Architecture
 
-Use a local-first integration path for the MVP. Treat the official Firewalla MSP API as a paid optional integration.
+## Overview
 
-The implementation target is an AI-facing CLI and root skill. The CLI collects read-only local data through SSH/Redis and emits JSON artifacts. Local artifacts are private by default; redaction is an explicit export/sharing mode. The skill tells future agents when to use the CLI, how to install it, what privacy boundaries apply, and how to verify outputs.
+The tool runs as a local Python CLI that connects to a Firewalla device over SSH, issues read-only Redis commands, and produces structured JSON artifacts on the local filesystem. It has no server component, no daemon, and no persistent state beyond the artifacts it writes.
 
-## Rationale
+```
+User Machine                          Firewalla
+┌─────────────┐     SSH + key       ┌──────────┐
+│  CLI (Python) │ ◄──────────────► │  Redis     │
+│               │   read-only cmds   │            │
+│  JSON artifacts│                   │            │
+│  → filesystem  │                   └──────────┘
+└─────────────┘
+```
 
-The official API is clean but appears gated behind paid MSP Professional/Business plans. The target user already owns Firewalla hardware and does not want an additional subscription for basic automation. Firewalla Gold-class devices expose SSH and can run Docker, so a local sidecar may provide useful read-only inspection without relying on MSP API access.
+## Transport Layer
 
-## Planned Layers
+SSH connection is configured through one of three mechanisms, checked in order:
+1. `.firewalla.local.json` — local config file with `ssh_alias` key.
+2. `FIREWALLA_SSH_ALIAS` environment variable — SSH config alias.
+3. `FIREWALLA_HOST` / `FIREWALLA_SSH_USER` / `FIREWALLA_SSH_KEY` environment variables — direct connection parameters.
 
-1. `skills/firewalla.md`: root agent workflow and safety policy.
-2. `src/firewalla_skill/`: future Python package for local collectors and optional MSP client.
-3. `scripts/`: future stable CLI wrappers.
-4. `tests/`: offline tests with fake fixtures; live tests opt-in only.
+The CLI invokes the system `ssh` command in batch mode and runs `redis-cli --raw` on the Firewalla. Connection lifecycle is per command: each invocation starts SSH, runs a bounded read pipeline, captures stdout/stderr, and exits.
 
-## Credential Inputs
+## Read-Only Allowlist
 
-The optional official path needs:
+Before any Redis command is issued, the CLI checks the command against a hardcoded allowlist:
 
-1. MSP portal domain, such as `example.firewalla.net`.
-2. MSP personal access token.
-3. Optional default box ID (`gid`) after listing boxes.
+```
+SCAN, HGETALL, ZRANGE, ZREVRANGE, ZRANGEBYSCORE, ZREVRANGEBYSCORE, ZCARD, GET, MGET, PING
+```
 
-The local-first path likely needs SSH access to the Firewalla box, or a sidecar container running on/near the box. The user should not provide credentials in chat. Store secrets locally in `.env` or a password manager and pass them through environment variables.
+Any command outside this list is rejected with an error before SSH transmission. This is a code-level enforcement, not a Firewalla-side ACL. It guarantees that even if the Firewalla Redis instance were misconfigured to be writable, the tool cannot issue writes.
 
-## Local Surface For MVP
+## Dry-Run Guard
 
-Read-only first:
+The CLI is dry-run by default. When `--execute` is absent:
+- SSH connection is not established.
+- Redis commands are printed to stdout instead of sent.
+- Artifact files are not written.
 
-1. basic box health through SSH commands or local files
-2. local log discovery
-3. read-only device inventory candidates
-4. read-only flow/alarm candidates
-5. optional `GET /v2/boxes` only if a paid MSP token exists
+This provides a safe preview path. `--execute` must be explicitly passed to perform any live operation.
 
-## Local-First Alternatives Survey
+## Collector Contracts
 
-### Option A: SSH + Redis read-only collector
+Each command is backed by a collector module that defines:
+- Which Redis keys to read.
+- Which Redis commands to issue.
+- How to transform raw Redis responses into the output JSON schema.
+- Privacy mode handling (identity function vs. redaction).
 
-Firewalla's public source shows that core runtime data is stored in local Redis. The repository uses `util/redis_manager.js` to create localhost Redis clients, including DB 0 and DB 1. Host, flow, and alarm modules read and write Redis directly.
+Collectors are stateless functions. They build read-only remote Redis commands, parse `redis-cli --raw` output, apply command-level parameters and privacy mode, and return JSON-serializable objects.
 
-Useful confirmed keys and patterns from source:
+### Alarm Time Windowing
 
-1. hosts: `host:mac:<mac>` and `host:ip4:<ip>` via `net2/HostTool.js`
-2. flow zsets: `flow:conn:in:<mac>`, `flow:conn:out:<mac>`, `flow:local:<mac>`, and `flow:conn:system` via `net2/FlowTool.js`
-3. active alarms: `alarm_active`, alarm payloads `_alarm:<aid>`, and alarm details `_alarmDetail:<aid>` via `alarm/AlarmManager2.js`
-4. archived alarms: `alarm_archive`
-5. active device last-flow index: `deviceLastFlowTs` via flow aggregation code
+The alarm collector reads `alarm_active`, then scans `alarm_archive` (a zset) with `--candidate-limit` bounding the scan range. For each candidate, it fetches `_alarm:<aid>` and `_alarmDetail:<aid>`. Time filtering uses the payload-level `timestamp` and `alarmTimestamp` fields, not the zset score. This avoids clock-skew between Redis zset score semantics and the alarm's own timestamp. `--since-days` is converted to a Unix timestamp cutoff; only alarms with payload timestamps after the cutoff are included.
 
-This is the best MVP route because it requires no paid MSP plan and no browser/app token. The skill can SSH into the Firewalla box and run read-only `redis-cli` queries, then normalize the output locally. This avoids modifying Firewalla services or enabling unauthenticated local APIs.
+### Device Identity Resolution
 
-Security posture:
+The device collector reads all `host:mac:*` keys. For each device, it extracts both operational names and discovery aliases. The `identity_conflict` flag is set when the preferred operational name (highest-precedence non-null name from `name`, `dhcpName` etc.) differs from any discovery alias. This flag is emitted in the output rather than being resolved automatically, because the correct resolution depends on operator knowledge.
 
-1. require SSH key auth, not password automation
-2. use read-only commands only: `SCAN`, `HGETALL`, `ZRANGE`, `ZREVRANGE`, `ZRANGEBYSCORE`, `ZREVRANGEBYSCORE`, `ZCARD`
-3. no writes to Redis, iptables, policy, or service files in MVP
-4. redact device names, MACs, local IPs, public IPs, and flow destinations before writing public artifacts
+## Privacy Modes
 
-### Option B: Official local Encipher runtime protocol
+Privacy transformation is applied at the collector output level, not at the Redis read level. The collector always reads raw values. The privacy module then scans the output dictionary and either passes it through (`private`) or redacts it (`redacted`).
 
-The community project `ccpk1/firewalla-local-ha` implements a cloud-assisted Additional Pairing flow followed by 100% local encrypted HTTP communication. Its architecture docs describe local runtime communication as encrypted POST requests to `http://{local_ip}:8833/v1/encipher/message/{gid}`. Credentials include `gid`, `eid`, `aid`, and a decrypted symmetric key.
+### Redaction Algorithm
 
-This route gives much richer access: runtime snapshots, system status, hosts, rules, user usage, WAN usage, speed tests, and mutations like pause/resume rules. It is likely the best V2 route, especially if we want Home Assistant-like control without MSP fees.
+1. Parse the JSON output tree.
+2. For each string leaf value, match against known patterns (MAC address, IP address, domain, device name token).
+3. If matched, replace with `<type:hash>` where hash is a deterministic SHA-256 prefix of the value (first 10 hex chars).
+4. Schema keys (dictionary keys) are never modified.
+5. The same value always produces the same token, enabling joins across artifacts.
 
-Tradeoff: implementation cost and security surface are higher. Pairing requires raw QR JSON from Firewalla's Additional Pairing flow, RSA key generation, cloud rendezvous, group polling, symmetric key decryption, and encrypted message construction. It also stores high-trust local credentials.
+### Redaction Token Types
 
-### Option C: Enable bundled local API manually
+| Token prefix | Matched pattern |
+|-------------|-----------------|
+| `<mac:...>` | MAC address |
+| `<ip:...>` | IPv4/IPv6 address |
+| `<bname:...>` | Device name / hostname |
+| `<domain:...>` | Domain name / FQDN |
+| `<message:...>` | Alarm message content |
 
-Firewalla source includes `api/app-local.js`, which exposes local `/v1` routes. In production/beta it appears to expose only `encipher` and `host`; flow/alarm/mode/test/policy/system routes are gated behind `!firewalla.isProductionOrBeta()`. An older Home Assistant integration (`my-given-name-is-jeremy/FirewallaForHASS`) used SSH tunneling to a localhost-bound unauthenticated API and a script under `~/.firewalla/config/post_main.d/` to enable `app-local`.
+## Alarm Attribution Semantics
 
-This route is not recommended for MVP. It may require modifying box startup behavior, can expose an unauthenticated local API if misconfigured, and is less clean than querying Redis read-only.
+Attribution maps alarms to devices. The attribution module only considers source/client fields from the alarm payload:
 
-### Option D: Browser / desktop cookie / Playwright
+- `device` (top-level device identifier)
+- `p.device.id`, `p.device.ip`, `p.device.mac`, `p.device.name`
+- `p.flows[].device`
 
-This remains a last resort. It is fragile, creates session-token handling risk, and duplicates a UI workflow when better local routes exist.
+Infrastructure fields (`p.intf.*`, interface identifiers, observation metadata) are excluded. These fields describe which Firewalla interface observed the traffic, not which client device generated it. Including them would produce incorrect attributions where network infrastructure appears to be the alarm source.
 
-## Updated MVP Decision
+In `private` mode, the attribution output includes a `device_summary` field with human-readable device identity information from the device inventory. In `redacted` mode, this field is tokenized.
 
-The MVP should implement Option A: SSH + Redis read-only collector.
+## Artifact Schemas
 
-Target first commands:
-
-1. list box health: use safe shell commands and Redis `sys:*` keys after discovery
-2. list devices: scan `host:mac:*`, normalize selected fields
-3. list active alarms: read `alarm_active`, then `_alarm:<aid>` and `_alarmDetail:<aid>`
-4. recent flows: for selected device MAC or `system`, read `flow:conn:*` zsets within a time window
-
-Option B should be documented as the V2 path if we need rule control or richer runtime snapshots.
-
-## CLI Contract
-
-The first CLI is `firewalla-skill`. It defaults to dry-run and prints a redacted SSH command. Users must add `--execute` before the CLI connects to a Firewalla box.
-
-Initial commands:
-
-1. `firewalla-skill health`: run `hostname`, `uptime`, and a safe Redis `PING` probe
-2. `firewalla-skill devices`: scan `host:mac:*`; `--all --json` emits parsed inventory, private by default with `--privacy redacted` for sharing
-3. `firewalla-skill alarms`: list active alarm IDs; `--since-days N --include-archive --all --json` emits parsed alarm records, private by default with `--privacy redacted` for sharing
-4. `firewalla-skill flows --system`: list recent system flow entries
-5. `firewalla-skill flows --mac <mac>`: list recent flow entries for one device MAC
-6. `firewalla-skill dump-format`: collect bounded examples for P0 surfaces into a git-ignored local artifact
-7. `firewalla-skill snapshot`: emit an AI-readable JSON snapshot for box, devices, alarms, flows, and collection metadata
-8. `firewalla-skill summary`: emit a compact JSON situation summary from an existing snapshot or live bounded read
-9. `firewalla-skill resolve-device`: resolve an anonymous token back to matching device records for redacted-artifact diagnostics
-
-The command builder enforces a Redis read-only allowlist. Mutation commands such as `SET` are rejected before execution.
-
-## Data Artifacts
-
-The CLI writes three kinds of artifacts:
-
-1. public-safe examples in `tests/fixtures/`, always fake
-2. local raw or semi-raw captures in `.firewalla_dumps/`, always git-ignored
-3. local report JSON on stdout or a user-selected path, private by default and redacted only when `--privacy redacted` is requested
-
-Raw or private live output must never be committed. The public repo may include sanitized format reports, but only after replacing device names, MACs, IPs, domains, destination hosts, alarm payloads, and flow payloads with fake values. The safety boundary is git ignore plus privacy scan, not forced local redaction.
-
-## Snapshot Schema
-
-The first stable schema is intentionally compact:
+Collection commands include command-specific data plus a `collection` metadata object:
 
 ```json
 {
-  "box": {
-    "hostname": "Firewalla",
-    "uptime": "private uptime string",
-    "redis": "PONG"
-  },
-  "devices": [],
   "alarms": [],
-  "flows": [],
-  "flows_summary": {},
   "collection": {
     "source": "ssh_redis",
     "privacy": "private",
+    "private": true,
     "redacted": false,
-    "generated_at": "2026-01-01T00:00:00Z"
+    "since_days": 3,
+    "include_archive": true,
+    "candidate_limit": 2000
   }
 }
 ```
 
-`devices`, `alarms`, and `flows` start as bounded samples, not complete database exports. Aggregation can grow once the field formats are known.
+Analysis commands such as `cluster`, `device-summary`, and `attribute` read these JSON artifacts and preserve their privacy metadata in their own output.
 
-## Summary Schema
+## Safety Boundaries
 
-`summary` produces a rule-based JSON brief that an AI agent can read before deciding whether deeper analysis is needed:
+Hard boundaries enforced in code:
 
-```json
-{
-  "headline": "Snapshot contains 2 devices, 1 alarms, and 5 sampled flows.",
-  "counts": {},
-  "box": {},
-  "alarm_types": {},
-  "flow_top_ports": {},
-  "notable_items": [],
-  "next_questions": []
-}
-```
+1. **Read-only Redis.** The allowlist is checked in the Redis command dispatch layer. No code path can bypass it.
+2. **Dry-run default.** `--execute` is a required flag for any live operation. Absent the flag, no SSH connection is opened.
+3. **No iptables, no policy changes, no service files.** The tool has no code paths for these operations.
+4. **No data exfiltration.** All artifacts are written to local filesystem paths. No network upload.
+5. **Git-ignored private data.** `.gitignore` covers `reports/`, `.firewalla_dumps/`, `.firewalla.local.json`, `.env`, and SSH config patterns.
 
-The summary is deterministic and does not call an LLM. It is a compact analysis substrate, not the final natural-language report.
+## Future Write Path Constraints
 
-## Alarm Clustering And Ignore Strategy
+Any future write functionality must be introduced through a separate RFC, require explicit user opt-in at both configuration and command-invocation level, and prefer official Firewalla mechanisms (app-supported alarm/notification tuning, local Encipher API) over direct Redis writes. Direct Redis writes carry risk of desynchronizing the Firewalla software's internal state assumptions.
 
-`cluster` groups alarm artifacts into first-pass actionability categories:
+## Testing Architecture
 
-1. `routine_noise`: game/video category alarms that often represent expected household behavior
-2. `review_bandwidth`: large upload or abnormal bandwidth alarms that need device/time context
-3. `review_network_security`: low-volume network/security alarms that should not be bulk-ignored
-4. `unknown_review`: any unclassified alarm type
+Tests are organized into two tiers:
 
-The output includes cluster counts, type mapping, top active hours, and recommendations. It is explicitly read-only.
+**Offline tests** (`-m "not live"`): Run without Firewalla connectivity. Cover dry-run behavior, allowlist enforcement, mutation rejection, config parsing, privacy redaction logic, timestamp filtering, schema key preservation, alarm attribution rules, identity conflict handling, and JSON schema conformance. Use mock Redis responses.
 
-Alert-noise handling should not default to creating network rules. Network rules change traffic behavior; most routine game/video alarms are notification or visibility noise. Future write support should first target official/app-supported alarm or notification tuning. Direct Redis writes are out of scope.
+**Live tests** (`-m live`): Gated by `FIREWALLA_LIVE_TESTS=1`. Require a live Firewalla on the local network with SSH access configured. Cover all read-only commands end-to-end. Do not modify any Firewalla state.
 
-## Stable Redaction And Device Attribution
+## Dependencies
 
-Private local output preserves raw identifiers because the primary use case is AI analysis on the user's own machine. Redaction is available for export and sharing. In redacted mode, sensitive values become stable anonymous tokens rather than a single placeholder. For example, a MAC address becomes `<mac:...>` and a device name-like field becomes `<bname:...>` or `<pname:...>`. The token is a short SHA-256 digest of the original value plus its kind.
-
-This allows safe local joins:
-
-```bash
-firewalla-skill device-summary --devices reports/devices_all_latest.json --output reports/devices_summary_latest.json
-firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
-```
-
-`attribute` uses token overlap only from source-like alarm fields, not from the entire alarm payload. Valid source fields include `device`, `p.device.id`, `p.device.ip`, `p.device.mac`, `p.device.name`, and `p.flows[].device`. Infrastructure/interface fields such as `p.intf.*` are excluded because they often contain the Firewalla gateway IP or interface identity. Treating those fields as source fields incorrectly attributes household alarms to Firewalla itself.
-
-Attribution output includes `device_summary` for each top device. Display IDs prefer current operational names (`name`, `dhcpName`, `localDomain`, `sambaName`, `ssdpName`) over discovery aliases (`bname`, `bonjourName`, `pname`). Discovery aliases are still emitted as `aliases`; if they conflict with current names, `identity_conflict` records both sides so reports can avoid presenting a stale Bonjour name as the current device identity.
-
-The redactor preserves schema keys such as `p.device.ip` and `p.intf.subnet`; it redacts values only. Field names are required for correct Firewalla interpretation and are not private by themselves.
-
-`resolve-device` is a secondary diagnostic workflow for redacted artifacts. It maps a stable anonymous token back to matching device records when a human needs to locate a device in the Firewalla App or verify a suspicious attribution. Normal private reports should already show readable names, IPs, MACs, vendor/type, and last-active fields.
-
-## Full Inventory And Alarm Windows
-
-The CLI must cover the common analysis question directly: all known devices and all alarms in a recent window. Agents should not need one-off scripts for this path.
-
-Canonical local report inputs:
-
-```bash
-firewalla-skill devices --execute --all --json --output reports/devices_all_latest.json
-firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
-```
-
-These outputs are private and report-oriented by default. They belong in ignored `reports/`. Use `--privacy redacted` only for artifacts that will be shared outside the local machine or copied into public docs/issues/PRs.
-
-Alarm time windows are filtered by `_alarm:<aid>` payload `timestamp` / `alarmTimestamp`. Redis sorted-set scores are used only for candidate ordering because `alarm_active` and `alarm_archive` do not consistently use event timestamp as score. `--candidate-limit` bounds how many IDs are inspected before payload filtering; the default is `2000`.
-
-## Test Tiers
-
-Tier 1 unit tests run by default with no network and no Firewalla. They cover command construction, read-only allowlists, parsing helpers, schema shape, and redaction.
-
-Tier 2 integration tests run by default unless explicitly deselected. They exercise the installed CLI using fake subprocess/fixture data and verify artifact behavior. They must not require SSH or real credentials.
-
-Tier 3 live tests are skipped unless `FIREWALLA_LIVE_TESTS=1` and a target is configured through `FIREWALLA_SSH_ALIAS` or equivalent env/config. Live tests are read-only and must start with `health`, then bounded P0 reads. No live test may write to Firewalla.
-
-## Skill Integration
-
-The public root skill is `skills/firewalla.md`. It should be installed into a target workspace by adding one pointer to that file from the workspace's `AGENTS.md`, `CLAUDE.md`, `rules/skills/INDEX.md`, or equivalent skill index.
-
-Private aliases belong outside the public repo. A user's local machine may use `.firewalla.local.json`, `.env`, or `~/.ssh/config`, all ignored or external to the repo.
-
-## Write Operations
-
-Rule creation, pause/resume, target list updates, alarm deletion, and other mutations are explicitly out of MVP. They require a separate RFC section and dry-run behavior.
-
-For ignoring alarms, the preferred future write path is alarm/notification tuning through an official MSP API or local Encipher API, not traffic rules. Create traffic rules only when the desired behavior is to allow, block, route, or limit traffic.
-
-## Fallbacks
-
-If local sources are insufficient:
-
-1. Consider the Home Assistant local integration approach.
-2. Consider reverse-engineered Internal Box API only as a later, explicitly accepted path.
-3. Consider the paid MSP API only if its value exceeds the subscription cost.
+- **Python 3.11+** — runtime.
+- **pytest** — test framework.
+- **uv** — package management and venv.

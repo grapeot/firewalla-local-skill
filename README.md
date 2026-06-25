@@ -1,59 +1,14 @@
+中文版本：见 [README.zh.md](README.zh.md).
+
 # Firewalla Local Skill
 
-AI-first skill and CLI for local-first, read-only Firewalla visibility.
+AI-first CLI and root skill for local-first, read-only visibility and analysis of a Firewalla device. Runs entirely on your own machine over SSH — no cloud relay, no MSP API required.
 
-## Status
+**Read-only by design.** The tool issues only read-only Redis commands against your Firewalla. It never modifies firewall rules, policies, Redis state, iptables, or system services.
 
-Early but runnable CLI. The implementation target is local-first read-only access for Firewalla Gold-class boxes. The official Firewalla MSP API remains a paid optional path.
+**Privacy-first.** All JSON artifacts are private by default. When you need to share artifacts (docs, issues, PRs), use `--privacy redacted` to replace real values with stable anonymous tokens while preserving schema keys for joins.
 
-## Privacy
-
-This repository is designed to be publishable; checked-in examples and tests are fake or redacted. Local CLI JSON output is private by default so an AI running on the user's machine can see real device names, IPs, MACs, domains, and alarm messages. Use `--privacy redacted` only when preparing an artifact for sharing or publication. Operational privacy rules live in `AGENTS.md` and `skills/firewalla.md`.
-
-## Install This Skill Into An AI Workspace
-
-Give an AI coding agent this repo URL and ask it to install the public root skill:
-
-```text
-Install the Firewalla Local Skill from this repository. Start from my workspace AGENTS.md or CLAUDE.md, follow any WORKSPACE.md routing, and add a pointer to skills/firewalla.md in the workspace skill discovery chain. If the workspace has rules/skills/INDEX.md or skills/INDEX.md, update that index; otherwise add a short pointer in AGENTS.md or CLAUDE.md.
-```
-
-Expose exactly one public root skill: `skills/firewalla.md`. Keep private SSH aliases, local IPs, tokens, and device names in local config, `.env`, or workspace-private overlays.
-
-## Credential Model
-
-MVP local-first environment variables:
-
-- `FIREWALLA_SSH_ALIAS`: optional SSH config alias, for example `firewalla`
-- `FIREWALLA_HOST`: local IP or DNS name of the Firewalla box
-- `FIREWALLA_SSH_USER`: SSH username, usually `pi`
-- `FIREWALLA_SSH_KEY`: path to a local SSH private key
-
-If `FIREWALLA_SSH_ALIAS` is set, the CLI uses it directly and lets OpenSSH read `~/.ssh/config`.
-
-For a local machine, prefer a git-ignored `.firewalla.local.json`:
-
-```json
-{
-  "ssh_alias": "firewalla"
-}
-```
-
-The CLI reads this file automatically from the project root.
-
-Optional official MSP API environment variables:
-
-- `FIREWALLA_MSP_DOMAIN`: your MSP portal domain, for example `example.firewalla.net`
-- `FIREWALLA_MSP_TOKEN`: personal access token created in Firewalla MSP
-- `FIREWALLA_BOX_ID`: optional default box `gid` for box-scoped operations
-
-Current finding: Firewalla MSP Lite does not appear to include API/Integration access. Professional or Business is required for official API access. See `docs/working.md`.
-
-## MVP Direction
-
-Use SSH to run read-only Redis queries on the Firewalla box. Do not require MSP API access.
-
-## Install For Local Development
+## Installation
 
 ```bash
 uv venv .venv
@@ -61,132 +16,91 @@ source .venv/bin/activate
 uv pip install -e '.[dev]'
 ```
 
-Run offline tests:
+## Quick Start
 
-```bash
-python -m pytest -q
+Create `.firewalla.local.json` (git-ignored):
+
+```json
+{"ssh_alias": "firewalla"}
 ```
 
-## CLI
+Or use environment variables: `FIREWALLA_SSH_ALIAS`, `FIREWALLA_HOST`, `FIREWALLA_SSH_USER`, `FIREWALLA_SSH_KEY`.
 
-The CLI defaults to dry-run. It prints a redacted SSH command instead of connecting to the box.
-
-Dry-run examples:
+All commands are **dry-run by default**. Add `--execute` to connect to Firewalla.
 
 ```bash
-firewalla-skill health --host 192.0.2.1 --key /path/to/fake/key
-firewalla-skill devices --host 192.0.2.1 --key /path/to/fake/key
-firewalla-skill alarms --host 192.0.2.1 --key /path/to/fake/key
-firewalla-skill flows --system --host 192.0.2.1 --key /path/to/fake/key
+firewalla-skill health --execute
+firewalla-skill devices --json --all --execute
+firewalla-skill alarms --json --since-days 7 --include-archive --all --execute
+firewalla-skill snapshot --execute
 ```
 
-SSH config alias example:
+## Privacy Modes
+
+| Mode | Behavior |
+|------|----------|
+| `private` (default) | Real values preserved. Artifacts stay in ignored paths. |
+| `redacted` | Values replaced with stable tokens such as `<mac:0123456789>`, `<ip:0123456789>`, and `<bname:0123456789>`. Schema keys unchanged. Tokens are deterministic per value, so joins work. |
+
+Use `--privacy redacted` when creating artifacts for public docs, issues, or PRs.
+
+## Security Model
+
+- SSH connection to Firewalla, authenticated with key.
+- Read-only Redis command allowlist: `SCAN`, `HGETALL`, `ZRANGE`, `ZREVRANGE`, `ZRANGEBYSCORE`, `ZREVRANGEBYSCORE`, `ZCARD`, `GET`, `MGET`, `PING`.
+- No Redis writes. No iptables changes. No policy changes. No service file changes.
+- Dry-run by default; `--execute` required for live connections.
+
+## Commands
+
+| Command | Purpose |
+|---------|---------|
+| `health` | Hostname, uptime, Redis PING |
+| `devices --json --all` | Device inventory from `host:mac:*` |
+| `alarms --json --since-days N --all` | Active and archived alarms with time-based windowing |
+| `flows` | Recent flow records by system or selected MAC |
+| `snapshot` | Bounded AI-readable snapshot |
+| `dump-format` | Local raw + redacted format dumps |
+| `summary` | Deterministic JSON brief from snapshot or live read |
+| `cluster` | Alarm actionability clusters |
+| `device-summary` | Current-vs-historical device inventory buckets |
+| `attribute` | Source-aware alarm-to-device attribution |
+| `resolve-device` | Diagnostic helper for redacted artifacts |
+
+## Alarm Attribution
+
+Attribution uses source/client fields only: `device`, `p.device.id`, `p.device.ip`, `p.device.mac`, `p.device.name`, `p.flows[].device`. Infrastructure/interface fields like `p.intf.*` are excluded; they describe Firewalla observation interfaces, not client sources.
+
+Device display IDs prefer current operational names (`name`, `dhcpName`, `localDomain`, `sambaName`, `ssdpName`). Stale discovery aliases (`bname`, `bonjourName`, `pname`) are secondary. `identity_conflict` is emitted when operational names disagree with aliases.
+
+## Alert Guidance
+
+- Do not create traffic/network rules merely to suppress alert noise.
+- Game/video alarms are typically notification noise.
+- Large upload and abnormal bandwidth alarms need device and time context.
+- UPNP, BRO_NOTICE, DUAL_WAN, and INTEL alerts should be reviewed before ignoring.
+- Prefer official/app-supported alarm tuning or local Encipher API over direct Redis writes.
+
+## Ignored Paths
+
+These paths are git-ignored and contain real local data:
+
+- `reports/`
+- `.firewalla_dumps/`
+- `.firewalla.local.json`
+- `.env`
+- SSH config files
+
+## Tests
 
 ```bash
-FIREWALLA_SSH_ALIAS=firewalla firewalla-skill health
-```
-
-With `.firewalla.local.json`, this becomes:
-
-```bash
-firewalla-skill health
-```
-
-Add `--execute` only when running against your own box. The CLI is dry-run by default.
-
-Current commands:
-
-1. `health`: `hostname`, `uptime`, and a safe Redis `PING` probe
-2. `devices`: Redis device records from `host:mac:*`, including `--all --json`
-3. `alarms`: active/recent alarm records, including `--since-days` and `--include-archive --json`
-4. `flows`: Redis `ZREVRANGE` for `flow:conn:system` or a MAC-specific flow key
-5. `snapshot`: bounded JSON snapshot for AI reasoning
-6. `dump-format`: bounded local raw/redacted dump for format discovery
-7. `summary`: compact JSON situation summary from a snapshot or live bounded read
-8. `cluster`: alarm clustering with read-only ignore recommendations
-9. `device-summary`: current-vs-historical device inventory cleanup
-10. `attribute`: alarm-to-device attribution with readable device summaries
-11. `resolve-device`: map an anonymous device token to matching device records for diagnostics
-
-Local format dump:
-
-```bash
-firewalla-skill dump-format --execute --limit 5
-```
-
-This writes to `.firewalla_dumps/`, which is ignored by git.
-
-Local human-facing reports can go in `reports/`. The directory is present in git, but report files are ignored by default.
-
-Summary from a snapshot:
-
-```bash
-firewalla-skill summary --input .firewalla_dumps/snapshot.json
-```
-
-Live bounded summary:
-
-```bash
-firewalla-skill summary --execute --limit 5
-```
-
-All devices and last-three-days alarms:
-
-```bash
-firewalla-skill devices --execute --all --json --output reports/devices_all_latest.json
-firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
-```
-
-Those local report artifacts are private by default and should stay under ignored `reports/`. For a public-safe artifact, add `--privacy redacted`:
-
-```bash
-firewalla-skill devices --execute --all --json --privacy redacted --output reports/devices_all_redacted.json
-firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --privacy redacted --output reports/alarms_last3d_redacted.json
-```
-
-Cluster recent alarms:
-
-```bash
-firewalla-skill cluster --alarms reports/alarms_last3d_latest.json --output reports/alarms_last3d_cluster.json
-```
-
-Summarize devices and attribute alarms by source device:
-
-```bash
-firewalla-skill device-summary --devices reports/devices_all_latest.json --output reports/devices_summary_latest.json
-firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
-```
-
-Resolve an anonymous device token from a redacted artifact when a human needs to locate or verify it:
-
-```bash
-firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --output reports/device_resolve_latest.json
-```
-
-`resolve-device` is only needed for redacted artifacts or diagnostics. Normal private reports should already include readable device summaries. To locate a redacted token in your own Firewalla App, explicitly include private local fields and keep the output in ignored `reports/`:
-
-```bash
-firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --include-private --output reports/private_device_resolve_latest.json
-```
-
-## Test Tiers
-
-Tier 1 unit tests and Tier 2 offline integration tests run by default:
-
-```bash
+# Offline tests
 python -m pytest -q -m "not live"
-```
 
-Tier 3 live tests are read-only and opt-in:
-
-```bash
+# Live tests (requires Firewalla connection)
 FIREWALLA_LIVE_TESTS=1 python -m pytest -q -m live
 ```
 
-Live tests require `FIREWALLA_SSH_ALIAS`, `.firewalla.local.json`, or equivalent target configuration.
+## License
 
-## Skill Entry
-
-Root skill: `skills/firewalla.md`
-
-An AI agent can install this skill by adding a pointer to `skills/firewalla.md` in the target workspace's skill index or agent instructions.
+MIT

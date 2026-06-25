@@ -1,58 +1,114 @@
-# Test Plan
+# Firewalla Local Skill — Test Plan
 
-## Offline Tests
+## Test Tiers
 
-Run:
+### Offline Tests
+
+Run without Firewalla connectivity:
 
 ```bash
-source .venv/bin/activate
-python -m pytest -q
+python -m pytest -q -m "not live"
 ```
 
-Use fake fixtures and dry-runs for:
+### Live Tests
 
-1. SSH command construction
-2. Redis read-only command allowlist
-3. mutation command rejection
-4. device/alarm/flow dry-run commands
-5. redaction of SSH key paths, hosts, MACs, and local IPs
-6. git-ignored local JSON config loading
-7. alarm time-window filtering by payload timestamp instead of Redis sorted-set score
-8. stable anonymous token redaction for safe joins
-9. device-summary and alarm-to-device attribution outputs
-10. preservation of Firewalla schema keys such as `p.device.ip` while redacting sensitive values
-11. source-aware alarm attribution that uses `p.device.*` / `p.flows[].device` and excludes `p.intf.*` infrastructure fields
-12. private-by-default JSON output with explicit `--privacy redacted` export mode
-13. readable `device_summary` in attribution output for private inputs
-14. device display precedence that prefers current names over stale Bonjour/BName aliases and flags identity conflicts
+Gated by `FIREWALLA_LIVE_TESTS=1`. Require a live Firewalla on the local network with SSH access configured:
 
-## Live Tests
+```bash
+FIREWALLA_LIVE_TESTS=1 python -m pytest -q -m live
+```
 
-Live tests must be opt-in and require explicit environment variables:
+## Coverage Areas
 
-- `FIREWALLA_LIVE_TESTS=1`
-- `FIREWALLA_HOST`
-- `FIREWALLA_SSH_USER`
-- `FIREWALLA_SSH_KEY`
+### Dry-Run & Execution Guard
+- All commands default to dry-run; no SSH connection opened without `--execute`.
+- Dry-run output matches expected Redis command sequence, formatted for human review.
+- `--execute` triggers live SSH connection and Redis interaction.
 
-Or:
+### Read-Only Allowlist
+- All allowlisted commands (`SCAN`, `HGETALL`, `ZRANGE`, `ZREVRANGE`, `ZRANGEBYSCORE`, `ZREVRANGEBYSCORE`, `ZCARD`, `GET`, `MGET`, `PING`) pass through to Redis.
+- Any command outside the allowlist is rejected at the dispatch layer before reaching SSH.
+- Write-like commands (`SET`, `DEL`, `HSET`, `ZADD`, `CONFIG`, `FLUSHDB`, `SHUTDOWN`) are rejected.
 
-- `FIREWALLA_SSH_ALIAS`
+### Mutation Rejection
+- No Redis key is created, modified, or deleted by any implemented command.
+- No Firewalla policy, iptables rule, or service file is altered.
 
-Or a git-ignored `.firewalla.local.json` with `ssh_alias`.
+### Configuration
+- `.firewalla.local.json` is parsed correctly with valid `ssh_alias`.
+- Missing config file falls back to environment variables or normal SSH target resolution.
+- Environment variable fallback: `FIREWALLA_SSH_ALIAS` overrides config; `FIREWALLA_HOST`/`FIREWALLA_SSH_USER`/`FIREWALLA_SSH_KEY` provide direct connection when no alias is present.
 
-Live tests must start with `firewalla-skill health --execute` only. Any write operation needs a separate RFC and opt-in flag.
+### Privacy Mode
+- `private` mode preserves all values unchanged.
+- `redacted` mode replaces MAC addresses, IP addresses, device names, domains, and alarm messages with token format `<type:hash>`.
+- Schema keys are never modified in redacted mode.
+- Redaction is deterministic: same input produces same token on repeated calls.
+- Tokens from one artifact can be joined with tokens in another (same value maps to same token across commands).
 
-Live read-only alarm tests must cover `alarms --since-days 3 --include-archive --all --json` to verify active/archive candidate collection and payload timestamp filtering.
+### Timestamp Filtering
+- `alarms --since-days N` includes alarms with payload `timestamp` or `alarmTimestamp` within the window.
+- Alarms outside the window are excluded.
+- Time filtering uses payload timestamps, not Redis zset scores.
+- Edge cases: zero days (no alarms returned), far-future `--since-days` (all alarms returned).
 
-Live read-only report tests must cover `device-summary` and `attribute` on live private artifacts to verify device cleanup and source-aware alarm attribution produce readable device summaries. Live tests should also exercise `--privacy redacted` for at least one bounded artifact.
+### Device Collection
+- `devices --json --all` returns full `host:mac:*` inventory.
+- Each device includes all operational identifiers and discovery aliases.
+- Device count in output matches expected count from direct Redis key enumeration.
 
-Optional MSP API tests are separate and only apply when a paid MSP token is available.
+### Alarm Collection
+- `alarms --json --all` includes both active and archived alarms.
+- `--since-days` correctly bounds the result set.
+- `--candidate-limit` bounds the number of archive entries scanned.
+- `--include-archive` controls archive inclusion independently of active alarms.
 
-## Verified On 2026-06-24
+### Alarm Attribution
+- `attribute` uses source/client fields only: `device`, `p.device.id`, `p.device.ip`, `p.device.mac`, `p.device.name`, `p.flows[].device`.
+- Infrastructure fields (`p.intf.*`) are excluded from attribution.
+- Each attributed alarm links to exactly one output device record.
+- `device_summary` is present in private mode and contains readable device identity.
+- `device_summary` is tokenized in redacted mode.
 
-`python -m pytest -q -m "not live"` passes with the offline tests. Live tests require explicit authorization and `FIREWALLA_LIVE_TESTS=1`.
+### Identity Conflict
+- `identity_conflict` flag is emitted when a device's operational name differs from its discovery alias.
+- No conflict when all names are consistent.
+- Conflict flag includes both the operational name and the conflicting alias for diagnosis.
 
-## Privacy Check
+### Snapshot & Summary
+- `snapshot` produces bounded JSON within size constraints suitable for direct LLM context insertion.
+- `summary` produces deterministic output; same input yields identical summary.
+- `snapshot --privacy redacted` applies redaction to the snapshot content.
 
-Before publishing, scan tracked files for real credentials, private domains, local IPs, MAC addresses, device names, alarm payloads, flow payloads, and password-manager references. Private local artifacts are allowed only under ignored paths such as `reports/` and `.firewalla_dumps/`.
+### Dump Format
+- `dump-format` writes formatted output to `.firewalla_dumps/`.
+- Raw format preserves all values.
+- Redacted format applies tokenization.
+- Output files are self-documenting with schema indicators.
+
+### Cluster
+- `cluster` assigns each alarm to one of: `routine_noise`, `review_bandwidth`, `review_network_security`, `unknown_review`.
+- Cluster assignment is deterministic for the same alarm payload.
+- All alarms in a given cluster share structural characteristics matching the cluster definition.
+
+### Device Summary
+- `device-summary` reports current-vs-historical activity buckets and device type counts.
+- Devices with missing detect type are counted explicitly.
+- Device type categorization preserves Firewalla's own detect type values.
+
+### Resolve Device
+- `resolve-device` accepts a redacted token and returns matching device fields from the current device inventory.
+- Returns an empty result when no device matches the token.
+- Works with tokens of type `<mac:...>`, `<ip:...>`, and `<bname:...>`.
+
+### Live Read-Only Commands
+- All commands execute against a live Firewalla without errors.
+- No state mutation on the Firewalla.
+- Output conforms to documented JSON schemas.
+
+### Edge Cases
+- Empty device inventory (rare but possible on newly provisioned boxes).
+- No alarms in the requested time window.
+- Firewalla unreachable (SSH timeout, wrong key, network down) produces a clear error with actionable message.
+- Very large alarm archives with `--candidate-limit` bounding.
+- Devices with partial or missing fields — output gracefully handles null fields without crashing.
