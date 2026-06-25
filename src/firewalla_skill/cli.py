@@ -8,7 +8,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Sequence
 
@@ -177,6 +177,29 @@ def zrange_with_scores_to_pairs(lines: list[str]) -> list[dict[str, object]]:
     return pairs
 
 
+def alarm_payload_timestamp(alarm: dict[str, object]) -> float | None:
+    payload = alarm.get("alarm")
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("timestamp") or payload.get("alarmTimestamp")
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def filter_alarms_since(alarms: list[dict[str, object]], since_days: int | None, now: datetime | None = None) -> list[dict[str, object]]:
+    if since_days is None:
+        return alarms
+    cutoff = (now or datetime.now(UTC)).timestamp() - since_days * 24 * 60 * 60
+    filtered: list[dict[str, object]] = []
+    for alarm in alarms:
+        timestamp = alarm_payload_timestamp(alarm)
+        if timestamp is not None and timestamp >= cutoff:
+            filtered.append(alarm)
+    return filtered
+
+
 def load_local_config(path: str | None = None) -> dict[str, object]:
     config_path = Path(path or LOCAL_CONFIG)
     if not config_path.exists():
@@ -288,20 +311,24 @@ def collect_alarms(
     limit: int | None,
     since_days: int | None = None,
     include_archive: bool = False,
+    candidate_limit: int | None = 2000,
 ) -> tuple[list[object], list[dict[str, object]]]:
     sources = ["alarm_active"]
     if include_archive:
         sources.append("alarm_archive")
     if since_days is not None:
-        cutoff = datetime.now(UTC) - timedelta(days=since_days)
-        score_selector = "ZREVRANGEBYSCORE \"$source\" +inf " + shlex.quote(str(cutoff.timestamp()))
+        # ZSET scores are not reliable timestamps across active/archive sets.
+        # Fetch candidates first, then filter by _alarm:<aid> payload timestamp.
+        score_selector = "ZREVRANGE \"$source\" 0 -1"
     else:
         end = -1 if limit is None else limit - 1
         score_selector = "ZREVRANGE \"$source\" 0 " + shlex.quote(str(end))
 
     limit_filter = ""
-    if limit is not None and since_days is not None:
+    if limit is not None and since_days is None:
         limit_filter = " | head -n " + shlex.quote(str(limit))
+    elif candidate_limit is not None and since_days is not None:
+        limit_filter = " | head -n " + shlex.quote(str(candidate_limit))
 
     source_list = " ".join(shlex.quote(source) for source in sources)
     remote = (
@@ -345,6 +372,9 @@ def collect_alarms(
         current[mode] = pair_lines_to_dict(lines)
         if str(current.get("id")) not in seen:
             alarms.append(current)
+    alarms = filter_alarms_since(alarms, since_days)
+    if limit is not None and since_days is not None:
+        alarms = alarms[:limit]
     return redacted_json_value(alarms), raw
 
 
@@ -611,6 +641,7 @@ def cmd_alarms(args: argparse.Namespace) -> int:
             limit=None if args.all else args.limit,
             since_days=args.since_days,
             include_archive=args.include_archive,
+            candidate_limit=args.candidate_limit,
         )
         if not args.execute:
             print(json.dumps({"dry_run": True, "message": "alarms --json requires --execute to collect data"}, indent=2))
@@ -624,6 +655,7 @@ def cmd_alarms(args: argparse.Namespace) -> int:
                 "limit": None if args.all else args.limit,
                 "since_days": args.since_days,
                 "include_archive": args.include_archive,
+                "candidate_limit": args.candidate_limit,
             },
         }
         if args.output:
@@ -736,6 +768,7 @@ def build_parser() -> argparse.ArgumentParser:
     alarms.add_argument("--limit", type=int, default=20, help="maximum alarm ids")
     alarms.add_argument("--all", action="store_true", help="collect all matching alarm records when used with --json")
     alarms.add_argument("--since-days", type=int, help="collect alarms newer than this many days when used with --json")
+    alarms.add_argument("--candidate-limit", type=int, default=2000, help="candidate IDs to inspect before payload timestamp filtering")
     alarms.add_argument("--include-archive", action="store_true", help="include alarm_archive in addition to alarm_active")
     alarms.add_argument("--json", action="store_true", help="emit parsed redacted JSON instead of raw Redis output")
     alarms.add_argument("--output", help="write JSON output to this path")

@@ -187,6 +187,8 @@ firewalla-skill alarms --execute --since-days 3 --include-archive --all --json -
 
 These outputs are redacted and report-oriented, but still local-only by default because they can reveal household network structure through counts and timing.
 
+Alarm time windows are filtered by `_alarm:<aid>` payload `timestamp` / `alarmTimestamp`. Redis sorted-set scores are used only for candidate ordering because `alarm_active` and `alarm_archive` do not consistently use event timestamp as score. `--candidate-limit` bounds how many IDs are inspected before payload filtering; the default is `2000`.
+
 ## Test Tiers
 
 Tier 1 unit tests run by default with no network and no Firewalla. They cover command construction, read-only allowlists, parsing helpers, schema shape, and redaction.

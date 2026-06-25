@@ -56,7 +56,7 @@ The CLI should therefore prioritize facts that help an agent answer household-ne
 These are the first data surfaces to dump and normalize.
 
 1. Device inventory from `host:mac:*`: device identity, last active time, IP mappings, vendor/type/name-like fields, online/offline hints, and group/user relationships if visible.
-2. Active alarms from `alarm_active` plus `_alarm:<aid>` and `_alarmDetail:<aid>`: alarm type, timestamp, device/entity, severity-like fields, destination/domain/IP fields, and status.
+2. Active/recent alarms from `alarm_active`, `alarm_archive`, `_alarm:<aid>`, and `_alarmDetail:<aid>`: alarm type, payload timestamp, device/entity, severity-like fields, destination/domain/IP fields, and status. Time windows must use payload `timestamp` / `alarmTimestamp`, not Redis sorted-set score.
 3. Recent flows from `flow:conn:*` and `flow:local:*`: source device, direction, destination, port/protocol, bytes/counts, timestamps, and category fields if present.
 4. Basic box health: hostname, uptime, Redis availability, Firewalla software/version candidates, WAN/LAN status candidates, and resource/load indicators.
 
