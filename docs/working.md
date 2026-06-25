@@ -12,13 +12,16 @@
 - Current implementation recommendation: start with SSH + Redis read-only collector, then consider local Encipher runtime protocol if richer control is needed.
 - Added an initial Python CLI skeleton with dry-run-first SSH/Redis commands: `health`, `devices`, `alarms`, and `flows`.
 - Added offline tests for read-only Redis command construction, mutation rejection, redaction, and dry-run output. `python -m pytest -q` passes with 5 tests.
-- Added SSH config alias support through `--ssh-alias` / `FIREWALLA_SSH_ALIAS`, so an existing `ssh firewall` setup can be reused without copying host/user/key into project config.
+- Added SSH config alias support through `--ssh-alias` / `FIREWALLA_SSH_ALIAS`, so an existing SSH config setup can be reused without copying host/user/key into project config.
 - Live read-only health check succeeded with the `firewalla` SSH alias: `hostname`, `uptime`, and `redis-cli PING` returned successfully.
 - Added git-ignored `.firewalla.local.json` support so local target config can live outside public repo files.
 - Promoted flows into P0 per product direction.
 - Added `snapshot` and `dump-format` CLI commands for bounded redacted JSON artifacts and local-only raw format dumps.
 - Added three test tiers: unit, offline integration, and opt-in live tests.
 - Ran bounded live format dump and wrote sanitized findings to `docs/format_report.md`.
+- Final verification before publishing: offline tests `14 passed, 3 deselected`; live tests `3 passed, 14 deselected`; privacy scan returned no matches.
+- Published public GitHub repo: `https://github.com/grapeot/firewalla-local-skill`.
+- Configured GitHub Actions CI and main branch protection with required `test` status check, no required reviewers, no force pushes, and no branch deletion.
 
 ## Lessons Learned
 

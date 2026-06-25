@@ -26,7 +26,7 @@ Expose exactly one public root skill: `skills/firewalla.md`. Keep private SSH al
 
 MVP local-first environment variables:
 
-- `FIREWALLA_SSH_ALIAS`: optional SSH config alias, for example `firewall`
+- `FIREWALLA_SSH_ALIAS`: optional SSH config alias, for example `firewalla`
 - `FIREWALLA_HOST`: local IP or DNS name of the Firewalla box
 - `FIREWALLA_SSH_USER`: SSH username, usually `pi`
 - `FIREWALLA_SSH_KEY`: path to a local SSH private key
@@ -85,7 +85,7 @@ firewalla-skill flows --system --host 192.0.2.1 --key /path/to/fake/key
 SSH config alias example:
 
 ```bash
-FIREWALLA_SSH_ALIAS=firewall firewalla-skill health
+FIREWALLA_SSH_ALIAS=firewalla firewalla-skill health
 ```
 
 With `.firewalla.local.json`, this becomes:
