@@ -90,6 +90,14 @@ firewalla-skill devices --execute --all --json --output reports/devices_all_late
 firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
 ```
 
+Cluster alarms before recommending what to ignore:
+
+```bash
+firewalla-skill cluster --alarms reports/alarms_last3d_latest.json --output reports/alarms_last3d_cluster.json
+```
+
+Do not recommend creating network rules merely to reduce alert noise. Prefer Firewalla alarm/notification tuning where available; traffic rules are for changing traffic behavior.
+
 For format discovery, prefer:
 
 ```bash

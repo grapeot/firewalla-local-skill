@@ -57,3 +57,16 @@ def test_alarms_since_days_json_dry_run(capsys, tmp_path):
     assert main(["alarms", "--config", str(config), "--since-days", "3", "--include-archive", "--all", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["dry_run"] is True
+
+
+@pytest.mark.integration
+def test_cluster_from_alarm_fixture_outputs_recommendations(capsys, tmp_path):
+    alarms = tmp_path / "alarms.json"
+    alarms.write_text(
+        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "state": "active"}}], "collection": {"redacted": True}}),
+        encoding="utf-8",
+    )
+    assert main(["cluster", "--alarms", str(alarms)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["clusters"]["by_category"] == {"routine_noise": 1}
+    assert payload["recommendations"][0]["write_needed"] is False

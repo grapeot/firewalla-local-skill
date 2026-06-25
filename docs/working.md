@@ -27,6 +27,8 @@
 - Added git-ignored `reports/` directory for local human-facing reports, with tracked `.gitkeep` for discoverability.
 - Added first-class CLI support for full device inventory and recent alarm windows: `devices --all --json` and `alarms --since-days N --include-archive --all --json`.
 - Updated local Chinese report using CLI-generated all-device and last-three-days alarm artifacts.
+- Added `cluster` command for read-only alarm actionability clusters and ignore recommendations.
+- Updated local Chinese report with alarm cluster results and guidance against using network rules as the default alert-noise solution.
 
 ## Lessons Learned
 

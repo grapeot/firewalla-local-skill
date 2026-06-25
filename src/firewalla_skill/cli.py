@@ -441,6 +441,117 @@ def summarize_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
     return redacted_json_value(summary)
 
 
+ALARM_CATEGORY = {
+    "ALARM_GAME": "routine_noise",
+    "ALARM_VIDEO": "routine_noise",
+    "ALARM_LARGE_UPLOAD": "review_bandwidth",
+    "ALARM_ABNORMAL_BANDWIDTH_USAGE": "review_bandwidth",
+    "ALARM_INTEL": "review_network_security",
+    "ALARM_UPNP": "review_network_security",
+    "ALARM_BRO_NOTICE": "review_network_security",
+    "ALARM_DUAL_WAN": "review_network_security",
+}
+
+CATEGORY_RECOMMENDATIONS = {
+    "routine_noise": {
+        "default_action": "consider_mute_or_reduce_notifications",
+        "write_needed": False,
+        "rationale": "These alarms usually describe expected application categories. Treat them as visibility signals before treating them as traffic that should be blocked.",
+    },
+    "review_bandwidth": {
+        "default_action": "review_device_and_time_window",
+        "write_needed": False,
+        "rationale": "Large upload or abnormal bandwidth alarms can be expected backups, media sync, or real anomalies. Review before muting or blocking.",
+    },
+    "review_network_security": {
+        "default_action": "review_before_ignore",
+        "write_needed": False,
+        "rationale": "Low-volume network/security alarms can have higher value than routine app-category alarms. Do not bulk-ignore them without checking context.",
+    },
+    "unknown_review": {
+        "default_action": "review_unknown_type",
+        "write_needed": False,
+        "rationale": "Unknown alarm types need classification before an ignore policy is safe.",
+    },
+}
+
+
+def local_hour_from_timestamp(value: object) -> str | None:
+    try:
+        ts = float(str(value))
+    except (TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:00")
+
+
+def cluster_alarms_payload(payload: dict[str, object]) -> dict[str, object]:
+    alarms = payload.get("alarms") if isinstance(payload.get("alarms"), list) else []
+    type_counts: dict[str, int] = {}
+    state_counts: dict[str, int] = {}
+    source_counts: dict[str, int] = {}
+    hour_counts: dict[str, int] = {}
+    category_counts: dict[str, int] = {}
+    type_to_category: dict[str, str] = {}
+
+    for alarm in alarms:
+        if not isinstance(alarm, dict):
+            continue
+        alarm_payload = alarm.get("alarm") if isinstance(alarm.get("alarm"), dict) else {}
+        alarm_type = str(alarm_payload.get("type") or "<missing>")
+        state = str(alarm_payload.get("state") or "<missing>")
+        source = str(alarm.get("source") or "<missing>")
+        category = ALARM_CATEGORY.get(alarm_type, "unknown_review")
+        hour = local_hour_from_timestamp(alarm_payload.get("timestamp") or alarm_payload.get("alarmTimestamp"))
+
+        type_counts[alarm_type] = type_counts.get(alarm_type, 0) + 1
+        state_counts[state] = state_counts.get(state, 0) + 1
+        source_counts[source] = source_counts.get(source, 0) + 1
+        category_counts[category] = category_counts.get(category, 0) + 1
+        type_to_category[alarm_type] = category
+        if hour:
+            hour_counts[hour] = hour_counts.get(hour, 0) + 1
+
+    total = len(alarms)
+    type_counts = dict(sorted(type_counts.items(), key=lambda item: (-item[1], item[0])))
+    category_counts = dict(sorted(category_counts.items(), key=lambda item: (-item[1], item[0])))
+    top_hours = dict(sorted(hour_counts.items(), key=lambda item: (-item[1], item[0]))[:10])
+
+    recommendations = []
+    for category, count in category_counts.items():
+        rec = CATEGORY_RECOMMENDATIONS[category].copy()
+        rec["category"] = category
+        rec["count"] = count
+        rec["share"] = round(count / total, 4) if total else 0
+        recommendations.append(rec)
+
+    ignore_guidance = {
+        "create_network_rules_for_alert_noise": False,
+        "preferred_path": "Use Firewalla app alarm/notification tuning or a future official/local API path for alert state. Do not write Redis directly.",
+        "why": "Network rules change traffic behavior. Most game/video alarms are notification noise, not evidence that traffic should be blocked.",
+    }
+
+    return redacted_json_value(
+        {
+            "total_alarms": total,
+            "clusters": {
+                "by_category": category_counts,
+                "by_type": type_counts,
+                "by_state": dict(sorted(state_counts.items(), key=lambda item: (-item[1], item[0]))),
+                "by_source": dict(sorted(source_counts.items(), key=lambda item: (-item[1], item[0]))),
+                "top_hours": top_hours,
+            },
+            "type_to_category": dict(sorted(type_to_category.items())),
+            "recommendations": recommendations,
+            "ignore_guidance": ignore_guidance,
+            "limitations": [
+                "This cluster uses redacted alarm artifacts and does not yet join alarms to stable anonymized device IDs.",
+                "Recommendations are read-only and should be reviewed before any Firewalla configuration change.",
+            ],
+            "collection": payload.get("collection", {}),
+        }
+    )
+
+
 def build_snapshot(target: SshTarget, *, execute: bool, limit: int) -> tuple[dict[str, object], list[dict[str, object]]]:
     box, raw_health = collect_health(target, execute=execute)
     devices, raw_devices = collect_devices(target, execute=execute, limit=limit)
@@ -582,6 +693,18 @@ def cmd_summary(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cluster(args: argparse.Namespace) -> int:
+    loaded = load_json(args.alarms)
+    if not isinstance(loaded, dict):
+        raise SystemExit("cluster --alarms input must be a JSON object")
+    cluster = cluster_alarms_payload(loaded)
+    if args.output:
+        write_json(Path(args.output), cluster)
+    else:
+        print(json.dumps(cluster, indent=2, sort_keys=True))
+    return 0
+
+
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", help=f"local JSON config path; default: {LOCAL_CONFIG}")
     parser.add_argument("--ssh-alias", help="SSH config Host alias; defaults to FIREWALLA_SSH_ALIAS")
@@ -644,6 +767,12 @@ def build_parser() -> argparse.ArgumentParser:
     summary.add_argument("--limit", type=int, default=5, help="bounded live sample size when using --execute")
     summary.add_argument("--output", help="write summary JSON to this path")
     summary.set_defaults(func=cmd_summary)
+
+    cluster = subparsers.add_parser("cluster", help="cluster redacted alarm artifacts and suggest read-only ignore strategy")
+    cluster.add_argument("--alarms", required=True, help="redacted alarms JSON from firewalla-skill alarms --json")
+    cluster.add_argument("--devices", help="optional redacted devices JSON; reserved for future stable anonymous joins")
+    cluster.add_argument("--output", help="write cluster JSON to this path")
+    cluster.set_defaults(func=cmd_cluster)
 
     return parser
 
