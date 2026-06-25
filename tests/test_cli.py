@@ -8,6 +8,7 @@ from firewalla_skill.cli import (
     attribute_alarms_to_devices,
     build_redis_command,
     build_redis_raw_command,
+    build_active_devices_payload,
     build_ssh_command,
     cluster_alarms_payload,
     device_matches_token,
@@ -282,3 +283,41 @@ def test_filter_alarms_since_uses_payload_timestamp_not_source_score():
     filtered = filter_alarms_since(alarms, since_days=1, now=datetime.fromtimestamp(200000, UTC))
 
     assert [alarm["id"] for alarm in filtered] == ["new"]
+
+
+def test_build_active_devices_payload_joins_alarm_context_and_indicators():
+    devices = {
+        "devices": [
+            {
+                "fields": {
+                    "name": "CurrentBox",
+                    "bname": "OldBox",
+                    "mac": "aa:bb:cc:dd:ee:ff",
+                    "ipv4Addr": "192.0.2.42",
+                    "lastActiveTimestamp": 200000 - 60,
+                    "detect": {"type": "desktop", "os": "Windows"},
+                }
+            },
+            {"fields": {"name": "OldDevice", "lastActiveTimestamp": 200000 - 10 * 24 * 3600}},
+            {"fields": {"name": "MissingActivity"}},
+        ],
+        "collection": {"privacy": "private"},
+    }
+    alarms = {
+        "alarms": [
+            {"alarm": {"type": "ALARM_INTEL", "p.device.mac": "aa:bb:cc:dd:ee:ff", "timestamp": 199999}},
+            {"alarm": {"type": "ALARM_GAME", "p.device.mac": "aa:bb:cc:dd:ee:ff", "timestamp": 199998}},
+        ],
+        "collection": {"since_days": 7},
+    }
+
+    payload = build_active_devices_payload(devices, alarms, since_days=7, now=datetime.fromtimestamp(200000, UTC))
+
+    assert payload["summary"]["active_device_count"] == 1
+    assert payload["summary"]["excluded_counts"] == {"missing_last_active": 1, "outside_window": 1}
+    active = payload["active_devices"][0]
+    assert active["device_id"] == "CurrentBox"
+    assert active["alarm_context"]["alarm_count"] == 2
+    assert active["alarm_context"]["categories"] == {"review_network_security": 1, "routine_noise": 1}
+    assert "identity_conflict" in active["investigation_indicators"]
+    assert "network_security_alarm" in active["investigation_indicators"]

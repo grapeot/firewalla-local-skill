@@ -115,7 +115,30 @@ CLI 默认 dry-run。未提供 `--execute` 时：
 }
 ```
 
-`cluster`、`device-summary`、`attribute` 等分析命令读取这些 JSON 工件，并在输出中保留输入的隐私元数据。
+`cluster`、`device-summary`、`attribute`、`active-devices` 等分析命令读取这些 JSON 工件，并在输出中保留输入的隐私元数据。
+
+### 活跃设备调查 Schema
+
+`active-devices` 是本地工件关联命令。它读取设备清单，并可选读取告警工件，不连接 Firewalla。命令使用 `--since-days` 基于 `lastActiveTimestamp` 筛选设备，通过与 `attribute` 相同的源感知归因语义附加告警上下文，并输出 `investigation_indicators` 作为调查提示。
+
+```json
+{
+  "active_devices": [
+    {
+      "device_id": "Example Device",
+      "last_active_timestamp": 2000000000,
+      "last_active_age_days": 0.01,
+      "device_summary": {},
+      "alarm_context": {"alarm_count": 1, "categories": {}, "types": {}},
+      "investigation_indicators": ["network_security_alarm"]
+    }
+  ],
+  "summary": {
+    "active_device_count": 1,
+    "indicator_counts": {}
+  }
+}
+```
 
 ## 安全边界
 

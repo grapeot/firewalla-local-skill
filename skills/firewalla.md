@@ -55,6 +55,7 @@ Analyze collected artifacts locally:
 firewalla-skill device-summary --devices reports/devices_all_latest.json --output reports/devices_summary_latest.json
 firewalla-skill cluster --alarms reports/alarms_last3d_latest.json --output reports/alarms_last3d_cluster.json
 firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
+firewalla-skill active-devices --devices reports/devices_all_latest.json --alarms reports/alarms_last3d_latest.json --since-days 3 --output reports/active_devices_last3d.json
 ```
 
 Use snapshots for bounded AI context:

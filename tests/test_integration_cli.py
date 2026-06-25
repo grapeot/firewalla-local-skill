@@ -123,6 +123,40 @@ def test_attribute_private_inputs_emit_readable_device_summary(capsys, tmp_path)
 
 
 @pytest.mark.integration
+def test_active_devices_command_outputs_investigation_context(capsys, tmp_path):
+    devices = tmp_path / "devices.json"
+    alarms = tmp_path / "alarms.json"
+    devices.write_text(
+        json.dumps(
+            {
+                "devices": [
+                    {
+                        "fields": {
+                            "name": "Game PC",
+                            "mac": "aa:bb:cc:dd:ee:ff",
+                            "lastActiveTimestamp": 2000000000,
+                            "detect": {"type": "desktop"},
+                        }
+                    }
+                ],
+                "collection": {"privacy": "private"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    alarms.write_text(
+        json.dumps({"alarms": [{"alarm": {"type": "ALARM_UPNP", "p.device.mac": "aa:bb:cc:dd:ee:ff"}}], "collection": {"privacy": "private"}}),
+        encoding="utf-8",
+    )
+
+    assert main(["active-devices", "--devices", str(devices), "--alarms", str(alarms), "--since-days", "36500"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"]["active_device_count"] == 1
+    assert payload["active_devices"][0]["alarm_context"]["types"] == {"ALARM_UPNP": 1}
+    assert "network_security_alarm" in payload["active_devices"][0]["investigation_indicators"]
+
+
+@pytest.mark.integration
 def test_resolve_device_dry_run_defaults_to_redacted(capsys, tmp_path):
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
