@@ -186,9 +186,11 @@ firewalla-skill device-summary --devices reports/devices_all_latest.json --outpu
 firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
 ```
 
-`attribute` uses token overlap between redacted alarm records and redacted device records. It does not need raw MAC addresses or device names. If an alarm lacks device tokens, it remains unattributed.
+`attribute` uses token overlap only from source-like alarm fields, not from the entire alarm payload. Valid source fields include `device`, `p.device.id`, `p.device.ip`, `p.device.mac`, `p.device.name`, and `p.flows[].device`. Infrastructure/interface fields such as `p.intf.*` are excluded because they often contain the Firewalla gateway IP or interface identity. Treating those fields as source fields incorrectly attributes household alarms to Firewalla itself.
 
-`resolve-device` closes the human review loop after attribution identifies a top anonymous token. The capability is public and generally useful: every user needs to map anonymous findings back to devices they can inspect in the Firewalla App. The privacy boundary is at the output mode, not at the feature boundary. Default output is redacted JSON, so an AI agent can reason about match count, matched fields, and stable tokens without seeing real local identifiers. `--include-private` emits real local fields such as name, IP, MAC, and local domain for the user's own machine; agents should write that output only to git-ignored paths such as `reports/private_*.json`.
+The redactor preserves schema keys such as `p.device.ip` and `p.intf.subnet`; it redacts values only. Field names are required for correct Firewalla interpretation and are not private by themselves.
+
+`resolve-device` is a secondary diagnostic workflow. It maps a stable anonymous token back to matching device records when a human needs to locate a device in the Firewalla App or verify a suspicious attribution. The privacy boundary is at the output mode: default output is redacted JSON, while `--include-private` emits real local fields such as name, IP, MAC, and local domain for the user's own machine. Agents should write private output only to git-ignored paths such as `reports/private_*.json`.
 
 ## Full Inventory And Alarm Windows
 

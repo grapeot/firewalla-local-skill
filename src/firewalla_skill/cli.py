@@ -44,6 +44,14 @@ SENSITIVE_STRING_KEYS = {
     "dhcpname",
     "uid",
 }
+ALARM_DEVICE_KEYS = {
+    "device",
+    "p.device.id",
+    "p.device.ip",
+    "p.device.mac",
+    "p.device.name",
+    "p.device.macvendor",
+}
 
 MAC_PATTERN = re.compile(r"\b(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}\b")
 IPV4_PATTERN = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
@@ -179,6 +187,22 @@ def redact_sensitive_text(text: str) -> str:
     return text
 
 
+def sensitive_key_kind(key_hint: str | None) -> str | None:
+    if not key_hint:
+        return None
+    lowered = key_hint.lower()
+    leaf = lowered.rsplit(".", 1)[-1]
+    if leaf in {"mac", "intf_mac"}:
+        return "mac"
+    if leaf in {"ip", "ipv4", "ipv4addr"}:
+        return "ip"
+    if lowered in SENSITIVE_STRING_KEYS:
+        return lowered
+    if leaf in SENSITIVE_STRING_KEYS:
+        return leaf
+    return None
+
+
 def json_loads_maybe(value: str) -> object:
     stripped = value.strip()
     if not stripped:
@@ -193,16 +217,20 @@ def json_loads_maybe(value: str) -> object:
 
 def redacted_json_value(value: object, key_hint: str | None = None) -> object:
     if isinstance(value, str):
-        if key_hint and key_hint.lower() in SENSITIVE_STRING_KEYS:
-            return stable_token(key_hint.lower(), value)
+        kind = sensitive_key_kind(key_hint)
+        if kind and MAC_PATTERN.search(value):
+            return stable_token("mac", value)
+        if kind and IPV4_PATTERN.search(value):
+            return stable_token("ip", value)
+        if kind and kind not in {"mac", "ip"}:
+            return stable_token(kind, value)
         return redact_sensitive_text(value)
     if isinstance(value, list):
         return [redacted_json_value(item, key_hint=key_hint) for item in value]
     if isinstance(value, dict):
         redacted: dict[str, object] = {}
         for key, item in value.items():
-            redacted_key = str(redacted_json_value(str(key)))
-            redacted[redacted_key] = redacted_json_value(item, key_hint=str(key))
+            redacted[str(key)] = redacted_json_value(item, key_hint=str(key))
         return redacted
     return value
 
@@ -461,6 +489,20 @@ def extract_tokens(value: object) -> set[str]:
     return set(TOKEN_PATTERN.findall(json.dumps(value, sort_keys=True)))
 
 
+def extract_alarm_source_tokens(alarm: dict[str, object]) -> set[str]:
+    payload = alarm.get("alarm") if isinstance(alarm.get("alarm"), dict) else {}
+    tokens: set[str] = set()
+    for key, value in payload.items():
+        if str(key).lower() in ALARM_DEVICE_KEYS:
+            tokens.update(extract_tokens(value))
+    flows = payload.get("p.flows")
+    if isinstance(flows, list):
+        for flow in flows:
+            if isinstance(flow, dict) and "device" in flow:
+                tokens.update(extract_tokens(flow["device"]))
+    return tokens
+
+
 def numeric_timestamp(value: object) -> float | None:
     try:
         return float(str(value))
@@ -529,7 +571,7 @@ def attribute_alarms_to_devices(alarms_payload: dict[str, object], devices_paylo
     for alarm in alarms:
         if not isinstance(alarm, dict):
             continue
-        alarm_tokens = extract_tokens(alarm)
+        alarm_tokens = extract_alarm_source_tokens(alarm)
         alarm_payload = alarm.get("alarm") if isinstance(alarm.get("alarm"), dict) else {}
         alarm_type = str(alarm_payload.get("type") or "<missing>")
         category = ALARM_CATEGORY.get(alarm_type, "unknown_review")
@@ -548,25 +590,24 @@ def attribute_alarms_to_devices(alarms_payload: dict[str, object], devices_paylo
         item["types"][alarm_type] = item["types"].get(alarm_type, 0) + 1
 
     devices_ranked = sorted(attributed.values(), key=lambda item: (-int(item["alarm_count"]), str(item["device_id"])))
-    return redacted_json_value(
-        {
-            "total_alarms": len(alarms),
-            "total_devices": len(devices),
-            "attributed_alarm_count": sum(int(item["alarm_count"]) for item in devices_ranked),
-            "unattributed_alarm_count": unattributed,
-            "category_counts": bucket_counts(category_counts),
-            "type_counts": bucket_counts(type_counts),
-            "top_devices": devices_ranked[:20],
-            "limitations": [
-                "Attribution uses stable redacted token overlap, not raw MAC/device names.",
-                "If Firewalla alarm payloads omit device tokens, those alarms remain unattributed.",
-            ],
-            "collection": {
-                "alarms": alarms_payload.get("collection", {}),
-                "devices": devices_payload.get("collection", {}),
-            },
-        }
-    )
+    return {
+        "total_alarms": len(alarms),
+        "total_devices": len(devices),
+        "attributed_alarm_count": sum(int(item["alarm_count"]) for item in devices_ranked),
+        "unattributed_alarm_count": unattributed,
+        "category_counts": bucket_counts(category_counts),
+        "type_counts": bucket_counts(type_counts),
+        "top_devices": devices_ranked[:20],
+        "limitations": [
+            "Attribution uses stable redacted tokens from source-like alarm fields such as device, p.device.*, and p.flows[].device.",
+            "Infrastructure fields such as p.intf.* are intentionally excluded to avoid attributing alarms to the Firewalla gateway itself.",
+            "If Firewalla alarm payloads omit source device tokens, those alarms remain unattributed.",
+        ],
+        "collection": {
+            "alarms": alarms_payload.get("collection", {}),
+            "devices": devices_payload.get("collection", {}),
+        },
+    }
 
 
 def summarize_snapshot(snapshot: dict[str, object]) -> dict[str, object]:

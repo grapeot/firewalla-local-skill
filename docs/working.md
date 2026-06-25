@@ -32,6 +32,7 @@
 - Fixed alarm archive time-window filtering: `--since-days` now filters by `_alarm:<aid>` payload `timestamp` / `alarmTimestamp` instead of trusting Redis sorted-set scores. Added `--candidate-limit` to bound candidate IDs before payload filtering.
 - Added stable anonymous token redaction plus `device-summary` and `attribute` commands. Live attribution shows most recent alarm volume can be reduced to a small anonymous device set before human review.
 - Added `resolve-device` for the attribution follow-up loop. The command resolves a stable anonymous token to matching device records through read-only Redis. It defaults to redacted JSON for normal AI workflows; `--include-private` explicitly reveals real local fields for locating the device in the user's own Firewalla App.
+- Corrected alarm attribution semantics after a live report falsely concentrated 502 alarms on the Firewalla gateway. The root cause was arbitrary token overlap across the entire alarm payload, especially `p.intf.subnet`, plus redaction of schema keys. Attribution now preserves field names, uses source-like fields such as `p.device.*` and `p.flows[].device`, and excludes `p.intf.*` infrastructure fields.
 
 ## Lessons Learned
 
@@ -41,3 +42,4 @@
 - The local HA project confirms a richer local protocol over `http://{local_ip}:8833/v1/encipher/message/{gid}`, but it requires high-trust local credential handling.
 - The CLI defaults to dry-run and requires `--execute` before connecting to a real box.
 - Device resolution is a public workflow capability. Only the private-field reveal mode requires local-only handling.
+- Firewalla alarm field names are part of the schema, not private data. Redact values, not keys, otherwise parser and report semantics are lost.

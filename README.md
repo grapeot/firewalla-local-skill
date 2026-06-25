@@ -143,20 +143,20 @@ Cluster recent alarms:
 firewalla-skill cluster --alarms reports/alarms_last3d_latest.json --output reports/alarms_last3d_cluster.json
 ```
 
-Summarize and attribute by anonymous device:
+Summarize devices and attribute alarms by source device:
 
 ```bash
 firewalla-skill device-summary --devices reports/devices_all_latest.json --output reports/devices_summary_latest.json
 firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
 ```
 
-Resolve a top anonymous device from an attribution report:
+Resolve an anonymous device token when a human needs to locate or verify it:
 
 ```bash
 firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --output reports/device_resolve_latest.json
 ```
 
-By default this remains redacted and suitable for AI analysis. To locate the device in your own Firewalla App, explicitly include private local fields and keep the output in ignored `reports/`:
+By default this remains redacted and suitable for AI analysis. `resolve-device` is a lookup/diagnostic helper, not the primary alarm parser. To locate the device in your own Firewalla App, explicitly include private local fields and keep the output in ignored `reports/`:
 
 ```bash
 firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --include-private --output reports/private_device_resolve_latest.json
