@@ -1,141 +1,114 @@
 ---
 name: firewalla-skill
-description: Firewalla local-first skill for safe network visibility, alert review, device lookup, and future rule automation.
+description: Local-first, read-only Firewalla visibility and analysis through the firewalla-skill CLI.
 ---
 
 # Firewalla Skill
 
-Use this skill when working with Firewalla firewalls, especially Firewalla Gold-class boxes, through local-first access paths. The official Firewalla MSP API is a paid optional path.
+Use this skill when the user asks about Firewalla network state, device inventory, alarms, flows, or AI-assisted network analysis.
 
-## Goal
+## Core Rules
 
-Produce safe, AI-readable Firewalla network visibility artifacts without requiring a paid MSP API subscription.
+- Run commands from `adhoc_jobs/firewalla_skill/`.
+- Activate the project environment first: `source .venv/bin/activate`.
+- The CLI command is `firewalla-skill`.
+- Live collection is dry-run by default; add `--execute` only when you intend to query the user's Firewalla.
+- The integration is read-only. Do not write Redis, change iptables, alter Firewalla policies, or edit service files.
+- Local JSON output is private by default and may contain real names, IPs, MACs, domains, and alarm messages.
+- Use `--privacy redacted` for artifacts that may be shared in public docs, issues, PRs, screenshots, or messages.
 
-Successful use of this skill means:
+## Local Configuration
 
-1. read-only local access is configured through SSH or a local config file
-2. outputs are JSON artifacts suitable for AI analysis
-3. raw live data stays outside git
-4. no Firewalla mutation occurs unless a future write-specific workflow explicitly authorizes it
-
-## Safety Model
-
-- Prefer local SSH/Docker/read-only collectors over browser cookies, Playwright automation, or reverse-engineered Internal Box API when the official MSP API is not available.
-- Start read-only: box health, devices, alarms, flows, and statistics.
-- Do not create, delete, pause, or resume rules unless the user explicitly asks for a write operation.
-- Never print real tokens, box IDs, private device names, or flow records into public files.
-- Local JSON output is private by default so the user and their local AI can reason over real device names, IPs, MACs, domains, and alarm messages.
-- Use `--privacy redacted` only for artifacts intended for sharing, public docs, tests, issues, or PRs.
-- Keep live captures in `.firewalla_dumps/` or another git-ignored path.
-
-## Optional MSP API Environment
-
-Local-first MVP environment:
-
-```bash
-FIREWALLA_HOST=192.0.2.1
-FIREWALLA_SSH_USER=pi
-FIREWALLA_SSH_KEY=/path/to/fake/firewalla_id_ed25519
-```
-
-If the user already has an SSH config entry, prefer:
-
-```bash
-FIREWALLA_SSH_ALIAS=firewalla
-```
-
-For persistent local config, use git-ignored `.firewalla.local.json`:
+Prefer a git-ignored `.firewalla.local.json`:
 
 ```json
-{
-  "ssh_alias": "firewalla"
-}
+{"ssh_alias": "firewalla"}
 ```
 
-Optional paid MSP API environment:
+The CLI also supports `FIREWALLA_SSH_ALIAS`, or direct `FIREWALLA_HOST`, `FIREWALLA_SSH_USER`, and `FIREWALLA_SSH_KEY` environment variables.
+
+## Collection Workflow
+
+Start with health:
 
 ```bash
-FIREWALLA_MSP_DOMAIN=example.firewalla.net
-FIREWALLA_MSP_TOKEN=replace-token
-FIREWALLA_BOX_ID=00000000-0000-0000-0000-000000000000
+firewalla-skill health --execute
 ```
 
-`FIREWALLA_BOX_ID` is optional for discovery; it becomes useful after `boxes` returns a `gid`.
-
-## Current MVP Workflow
-
-1. Confirm local SSH access to Firewalla.
-2. Start with dry-run CLI commands: `firewalla-skill health`, `devices`, `alarms`, `flows`, `snapshot`, `summary`, and `dump-format`.
-3. Only use MSP API if the user has a paid plan token.
-4. Keep all mutation operations out of scope until read-only access is working.
-
-Add `--execute` only after reviewing the dry-run command.
-
-## Output Contract
-
-For AI analysis, prefer:
-
-```bash
-firewalla-skill snapshot --execute --limit 5 --output .firewalla_dumps/snapshot.json
-```
-
-Then summarize:
-
-```bash
-firewalla-skill summary --input .firewalla_dumps/snapshot.json
-```
-
-For full local report inputs, use the CLI instead of ad hoc SSH scripts. These outputs are private by default and belong in ignored `reports/`:
+Collect full local report inputs into ignored `reports/` files:
 
 ```bash
 firewalla-skill devices --execute --all --json --output reports/devices_all_latest.json
 firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
 ```
 
-For a public-safe artifact, explicitly request redaction:
+Create public-safe versions only when needed:
 
 ```bash
+firewalla-skill devices --execute --all --json --privacy redacted --output reports/devices_all_redacted.json
 firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --privacy redacted --output reports/alarms_last3d_redacted.json
 ```
 
-Cluster alarms before recommending what to ignore:
-
-```bash
-firewalla-skill cluster --alarms reports/alarms_last3d_latest.json --output reports/alarms_last3d_cluster.json
-```
-
-Clean up device scope and attribute alarms before giving user-facing advice. Attribution should use source-like alarm fields such as `p.device.*` and exclude `p.intf.*` infrastructure fields, which describe the Firewalla interface rather than the client device:
+Analyze collected artifacts locally:
 
 ```bash
 firewalla-skill device-summary --devices reports/devices_all_latest.json --output reports/devices_summary_latest.json
+firewalla-skill cluster --alarms reports/alarms_last3d_latest.json --output reports/alarms_last3d_cluster.json
 firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
 ```
 
-When reading attribution output, prefer `device_summary.name`, `dhcpName`, `localDomain`, or `sambaName` over stale `bname` / `bonjourName` aliases. If `identity_conflict` is present, report the current name and mention the stale alias separately.
-
-When an attribution report surfaces an anonymous token that needs human verification, resolve it before asking the user to manually hunt through the app:
+Use snapshots for bounded AI context:
 
 ```bash
-firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --output reports/device_resolve_latest.json
+firewalla-skill snapshot --execute --limit 5 --output reports/snapshot_latest.json
+firewalla-skill summary --input reports/snapshot_latest.json --output reports/summary_latest.json
 ```
 
-`resolve-device` is mainly for redacted artifacts or diagnostics. Private attribution reports should already include readable `device_summary` fields. If attribution points mostly to Firewalla itself, treat that as a parser bug or infrastructure-field match, not as a normal device finding.
-
-Do not recommend creating network rules merely to reduce alert noise. Prefer Firewalla alarm/notification tuning where available; traffic rules are for changing traffic behavior.
-
-For format discovery, prefer:
+Use `dump-format` only for local schema inspection:
 
 ```bash
 firewalla-skill dump-format --execute --limit 5
 ```
 
-The public repo may document field shapes and fake examples. It must not include raw live artifacts.
+It writes raw and redacted bounded dumps to `.firewalla_dumps/`, which is git-ignored.
 
-Human-readable local reports should be written under `reports/`. That directory is present for discoverability, while report files are git-ignored by default.
+## Attribution Rules
 
-## Verification
+For alarm-to-device attribution, trust source/client fields only:
 
-Default tests:
+- `device`
+- `p.device.id`
+- `p.device.ip`
+- `p.device.mac`
+- `p.device.name`
+- `p.flows[].device`
+
+Ignore infrastructure/interface fields such as `p.intf.*`; they describe where Firewalla observed traffic, not which client caused the alarm.
+
+When reading `attribute` output, use `device_summary` first. Device display names prefer current operational names: `name`, `dhcpName`, `localDomain`, `sambaName`, `ssdpName`. Treat `bname`, `bonjourName`, and `pname` as aliases. If `identity_conflict` is present, report both the current name and stale aliases instead of silently choosing the alias.
+
+## Alert Guidance
+
+- Do not recommend traffic or network rules only to reduce alert noise.
+- Game and video alarms are usually visibility or notification noise.
+- Large upload and abnormal bandwidth alarms need device and time context.
+- UPNP, BRO_NOTICE, DUAL_WAN, and INTEL alerts should be reviewed before ignoring.
+- Future write operations require a separate RFC and explicit opt-in. Prefer official Firewalla app alarm/notification tuning or local Encipher API over direct Redis writes.
+
+## Redacted Token Lookup
+
+Use `resolve-device` only for redacted artifacts or diagnostics:
+
+```bash
+firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --output reports/device_resolve_latest.json
+firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --include-private --output reports/private_device_resolve_latest.json
+```
+
+Private attribution reports should already include readable device summaries, so token lookup is usually unnecessary for normal local analysis.
+
+## Tests
+
+Offline tests:
 
 ```bash
 python -m pytest -q -m "not live"
@@ -148,7 +121,3 @@ FIREWALLA_LIVE_TESTS=1 python -m pytest -q -m live
 ```
 
 Live tests must remain read-only.
-
-## Known Plan Issue
-
-MSP Lite shows API/Integration as locked in current pricing/UI. Avoid designing the MVP around official API access unless the user upgrades.
