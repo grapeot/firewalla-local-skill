@@ -29,6 +29,7 @@
 - Updated local Chinese report using CLI-generated all-device and last-three-days alarm artifacts.
 - Added `cluster` command for read-only alarm actionability clusters and ignore recommendations.
 - Updated local Chinese report with alarm cluster results and guidance against using network rules as the default alert-noise solution.
+- Fixed alarm archive time-window filtering: `--since-days` now filters by `_alarm:<aid>` payload `timestamp` / `alarmTimestamp` instead of trusting Redis sorted-set scores. Added `--candidate-limit` to bound candidate IDs before payload filtering.
 
 ## Lessons Learned
 

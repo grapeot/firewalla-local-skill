@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 import pytest
 
@@ -8,6 +9,7 @@ from firewalla_skill.cli import (
     build_redis_raw_command,
     build_ssh_command,
     cluster_alarms_payload,
+    filter_alarms_since,
     main,
     load_local_config,
     pair_lines_to_dict,
@@ -151,3 +153,16 @@ def test_cluster_alarms_payload_classifies_actionability():
         "routine_noise": 1,
     }
     assert clustered["ignore_guidance"]["create_network_rules_for_alert_noise"] is False
+
+
+def test_filter_alarms_since_uses_payload_timestamp_not_source_score():
+    alarms = [
+        {"id": "old", "score": 9999999999, "alarm": {"timestamp": 100000}},
+        {"id": "new", "score": 1, "alarm": {"alarmTimestamp": 2000}},
+        {"id": "missing", "score": 9999999999, "alarm": {}},
+    ]
+
+    alarms[1]["alarm"]["alarmTimestamp"] = 150000
+    filtered = filter_alarms_since(alarms, since_days=1, now=datetime.fromtimestamp(200000, UTC))
+
+    assert [alarm["id"] for alarm in filtered] == ["new"]
