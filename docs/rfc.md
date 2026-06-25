@@ -115,7 +115,31 @@ Collection commands include command-specific data plus a `collection` metadata o
 }
 ```
 
-Analysis commands such as `cluster`, `device-summary`, and `attribute` read these JSON artifacts and preserve their privacy metadata in their own output.
+Analysis commands such as `cluster`, `device-summary`, `attribute`, and `active-devices` read these JSON artifacts and preserve their privacy metadata in their own output.
+
+### Active-Device Investigation Schema
+
+`active-devices` is a local artifact join. It reads a device inventory and, optionally, an alarm artifact. It does not connect to Firewalla. The command filters devices by `lastActiveTimestamp` using `--since-days`, attaches alarm context through the same source-only attribution semantics used by `attribute`, and emits `investigation_indicators` for triage. Alarm context is joined to the matching device record, not the display name, so duplicate names such as multiple watches remain distinct.
+
+```json
+{
+  "active_devices": [
+    {
+      "device_id": "Example Device",
+      "device_key": "host:mac:aa:bb:cc:dd:ee:ff",
+      "last_active_timestamp": 2000000000,
+      "last_active_age_days": 0.01,
+      "device_summary": {},
+      "alarm_context": {"alarm_count": 1, "categories": {}, "types": {}},
+      "investigation_indicators": ["network_security_alarm"]
+    }
+  ],
+  "summary": {
+    "active_device_count": 1,
+    "indicator_counts": {}
+  }
+}
+```
 
 ## Safety Boundaries
 

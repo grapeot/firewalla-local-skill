@@ -96,6 +96,13 @@ FIREWALLA_LIVE_TESTS=1 python -m pytest -q -m live
 - Devices with missing detect type are counted explicitly.
 - Device type categorization preserves Firewalla's own detect type values.
 
+### Active Devices
+- `active-devices` filters devices by `lastActiveTimestamp` and `--since-days`.
+- Devices outside the window and devices missing activity timestamps are counted in `excluded_counts`.
+- When an alarm artifact is provided, source-attributed alarm categories and types are attached to each matching active device.
+- Duplicate device display names remain distinct through record-level `device_key` output and record-index attribution.
+- Investigation indicators are emitted for identity conflicts, missing metadata, bandwidth alarms, network-security alarms, and unknown alarm types.
+
 ### Resolve Device
 - `resolve-device` accepts a redacted token and returns matching device fields from the current device inventory.
 - Returns an empty result when no device matches the token.

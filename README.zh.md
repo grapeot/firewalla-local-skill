@@ -32,6 +32,7 @@ uv pip install -e '.[dev]'
 firewalla-skill health --execute
 firewalla-skill devices --json --all --execute
 firewalla-skill alarms --json --since-days 7 --include-archive --all --execute
+firewalla-skill active-devices --devices reports/devices_all_latest.json --alarms reports/alarms_last7d_latest.json
 firewalla-skill snapshot --execute
 ```
 
@@ -65,6 +66,7 @@ firewalla-skill snapshot --execute
 | `cluster` | 告警可操作性聚类 |
 | `device-summary` | 当前与历史设备清单分桶和类型计数 |
 | `attribute` | 源感知的告警到设备归因 |
+| `active-devices` | 最近 N 天活跃设备调查上下文 |
 | `resolve-device` | 脱敏工件诊断辅助，将匿名 token 映射回设备字段 |
 
 ## 告警归因规则
@@ -72,6 +74,18 @@ firewalla-skill snapshot --execute
 归因仅使用源/客户端字段：`device`、`p.device.id`、`p.device.ip`、`p.device.mac`、`p.device.name`、`p.flows[].device`。排除基础设施/接口字段（如 `p.intf.*`），这些描述的是 Firewalla 观测接口而非客户端源。
 
 设备显示 ID 优先当前运行名称（`name`、`dhcpName`、`localDomain`、`sambaName`、`ssdpName`）。过期发现别名（`bname`、`bonjourName`、`pname`）为次要来源。当运行名称与别名不一致时发出 `identity_conflict`。
+
+## 活跃设备调查
+
+采集设备和告警工件后运行 `active-devices`：
+
+```bash
+firewalla-skill devices --execute --all --json --output reports/devices_all_latest.json
+firewalla-skill alarms --execute --since-days 7 --include-archive --all --json --output reports/alarms_last7d_latest.json
+firewalla-skill active-devices --devices reports/devices_all_latest.json --alarms reports/alarms_last7d_latest.json --since-days 7 --output reports/active_devices_last7d.json
+```
+
+输出包含活跃设备、当前身份字段、别名、detect 元数据、告警数量/类别/类型，以及 `identity_conflict`、`network_security_alarm`、`bandwidth_alarm` 等调查提示。
 
 ## 告警处理指引
 

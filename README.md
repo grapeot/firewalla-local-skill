@@ -32,6 +32,7 @@ All commands are **dry-run by default**. Add `--execute` to connect to Firewalla
 firewalla-skill health --execute
 firewalla-skill devices --json --all --execute
 firewalla-skill alarms --json --since-days 7 --include-archive --all --execute
+firewalla-skill active-devices --devices reports/devices_all_latest.json --alarms reports/alarms_last7d_latest.json
 firewalla-skill snapshot --execute
 ```
 
@@ -65,6 +66,7 @@ Use `--privacy redacted` when creating artifacts for public docs, issues, or PRs
 | `cluster` | Alarm actionability clusters |
 | `device-summary` | Current-vs-historical device inventory buckets |
 | `attribute` | Source-aware alarm-to-device attribution |
+| `active-devices` | Last-N-days active-device investigation context |
 | `resolve-device` | Diagnostic helper for redacted artifacts |
 
 ## Alarm Attribution
@@ -72,6 +74,18 @@ Use `--privacy redacted` when creating artifacts for public docs, issues, or PRs
 Attribution uses source/client fields only: `device`, `p.device.id`, `p.device.ip`, `p.device.mac`, `p.device.name`, `p.flows[].device`. Infrastructure/interface fields like `p.intf.*` are excluded; they describe Firewalla observation interfaces, not client sources.
 
 Device display IDs prefer current operational names (`name`, `dhcpName`, `localDomain`, `sambaName`, `ssdpName`). Stale discovery aliases (`bname`, `bonjourName`, `pname`) are secondary. `identity_conflict` is emitted when operational names disagree with aliases.
+
+## Active Device Investigation
+
+Use `active-devices` after collecting device and alarm artifacts:
+
+```bash
+firewalla-skill devices --execute --all --json --output reports/devices_all_latest.json
+firewalla-skill alarms --execute --since-days 7 --include-archive --all --json --output reports/alarms_last7d_latest.json
+firewalla-skill active-devices --devices reports/devices_all_latest.json --alarms reports/alarms_last7d_latest.json --since-days 7 --output reports/active_devices_last7d.json
+```
+
+The output includes active devices, current identity fields, aliases, detect metadata, alarm counts/categories/types, and investigation indicators such as `identity_conflict`, `network_security_alarm`, and `bandwidth_alarm`.
 
 ## Alert Guidance
 

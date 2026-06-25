@@ -17,10 +17,11 @@ The tool produces structured JSON artifacts that an AI agent can consume directl
 
 - SSH-based access to Firewalla Redis.
 - Read-only Redis command execution with a strict allowlist.
-- JSON artifact generation across the CLI command set: health, devices, alarms, flows, snapshot, dump-format, summary, cluster, device-summary, attribute, and resolve-device.
+- JSON artifact generation across the CLI command set: health, devices, alarms, flows, snapshot, dump-format, summary, cluster, device-summary, attribute, active-devices, and resolve-device.
 - Two privacy modes: `private` (real values, private paths) and `redacted` (stable anonymous tokens, shareable).
 - Time-bounded alarm collection with configurable candidate limits.
 - Source-aware device attribution with identity conflict detection.
+- Active-device investigation views that join inventory, recent alarms, identity metadata, and triage indicators.
 - Offline and live test suites.
 - `resolve-device` diagnostic tool for redacted artifacts.
 
@@ -56,6 +57,8 @@ Recent flow records keyed by system or device MAC, exposing connection metadata,
 
 Each command produces deterministic JSON output. The `snapshot` command produces a bounded AI-readable aggregate suitable for passing directly into an LLM context. The `summary` command computes a deterministic brief from either a snapshot or a live bounded read.
 
+The `active-devices` command reads local device and alarm artifacts and produces a last-N-days investigation view. It includes only devices whose `lastActiveTimestamp` falls inside the requested window, joins source-attributed alarm context when provided, and emits triage indicators for identity conflicts, missing metadata, bandwidth alarms, network-security alarms, and unknown alarm types.
+
 ## Device Identity Semantics
 
 Device display ID resolution prefers current operational names over stale discovery aliases. The precedence chain:
@@ -82,6 +85,7 @@ When operational names disagree with aliases (e.g., device renamed but old Bonjo
 - `alarms` returns active and archived alarms within the specified time window, bounded by candidate limit.
 - `alarms` time-filtering uses payload timestamps, not zset scores.
 - `attribute` correctly separates source/client fields from infrastructure/interface fields.
+- `active-devices` emits active devices with readable identity summaries, alarm context, and investigation indicators.
 - `identity_conflict` is emitted when operational names disagree with discovery aliases.
 - `redacted` mode produces deterministic tokens: same input yields same token, schema keys are unchanged.
 - Read-only allowlist is enforced: any write command is rejected.

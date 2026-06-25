@@ -35,6 +35,7 @@
 - Corrected alarm attribution semantics after a live report falsely concentrated 502 alarms on the Firewalla gateway. The root cause was arbitrary token overlap across the entire alarm payload, especially `p.intf.subnet`, plus redaction of schema keys. Attribution now preserves field names, uses source-like fields such as `p.device.*` and `p.flows[].device`, and excludes `p.intf.*` infrastructure fields.
 - Switched CLI JSON artifacts to private-by-default. `devices --json`, `alarms --json`, `snapshot`, and live `summary` now keep real local identifiers unless `--privacy redacted` is requested. `attribute` now includes a readable `device_summary` so local reports do not require token reverse lookup for normal analysis.
 - Updated device display identity precedence after a stale Bonjour/BName alias made a current `Nullptr` device appear as an old Mac mini. Attribution now prefers current operational names and emits alias/conflict metadata.
+- Added `active-devices` for last-N-days device investigation. It reads local device and alarm artifacts, filters by `lastActiveTimestamp`, joins source-attributed alarm context, and emits investigation indicators for identity conflicts, missing metadata, bandwidth alarms, network-security alarms, and unknown alarm types.
 
 ## Lessons Learned
 

@@ -619,6 +619,143 @@ def summarize_devices_payload(payload: dict[str, object], now: datetime | None =
     }
 
 
+def device_last_active(device: dict[str, object]) -> float | None:
+    fields = device.get("fields") if isinstance(device.get("fields"), dict) else {}
+    return numeric_timestamp(fields.get("lastActiveTimestamp"))
+
+
+def alarm_context_by_device_index(alarms_payload: dict[str, object], devices_payload: dict[str, object]) -> dict[int, dict[str, object]]:
+    alarms = alarms_payload.get("alarms") if isinstance(alarms_payload.get("alarms"), list) else []
+    devices = devices_payload.get("devices") if isinstance(devices_payload.get("devices"), list) else []
+
+    device_index: list[dict[str, object]] = []
+    for index, device in enumerate(devices):
+        if not isinstance(device, dict):
+            continue
+        device_index.append(
+            {
+                "index": index,
+                "id": device_display_id(device, f"<device-index:{index}>"),
+                "tokens": device_identity_tokens(device),
+            }
+        )
+
+    context: dict[int, dict[str, object]] = {}
+    for alarm in alarms:
+        if not isinstance(alarm, dict):
+            continue
+        alarm_tokens = extract_alarm_source_tokens(alarm)
+        alarm_payload = alarm.get("alarm") if isinstance(alarm.get("alarm"), dict) else {}
+        alarm_type = str(alarm_payload.get("type") or "<missing>")
+        category = ALARM_CATEGORY.get(alarm_type, "unknown_review")
+        timestamp = alarm_payload.get("timestamp") or alarm_payload.get("alarmTimestamp")
+        matches = [entry for entry in device_index if alarm_tokens & entry["tokens"]]
+        if not matches:
+            continue
+        matched_index = int(matches[0]["index"])
+        item = context.setdefault(matched_index, {"alarm_count": 0, "categories": {}, "types": {}, "latest_alarm_timestamp": None})
+        item["alarm_count"] = int(item["alarm_count"]) + 1
+        item["categories"][category] = item["categories"].get(category, 0) + 1
+        item["types"][alarm_type] = item["types"].get(alarm_type, 0) + 1
+        alarm_ts = numeric_timestamp(timestamp)
+        latest_ts = numeric_timestamp(item.get("latest_alarm_timestamp"))
+        if alarm_ts is not None and (latest_ts is None or alarm_ts > latest_ts):
+            item["latest_alarm_timestamp"] = alarm_ts
+    return context
+
+
+def active_device_indicators(summary: dict[str, object], alarm_context: dict[str, object]) -> list[str]:
+    indicators: list[str] = []
+    if "identity_conflict" in summary:
+        indicators.append("identity_conflict")
+    if not any(summary.get(key) for key in ("name", "dhcpName", "localDomain", "sambaName", "ssdpName", "bname", "bonjourName", "pname")):
+        indicators.append("missing_readable_name")
+    if not any(summary.get(key) for key in ("detect.brand", "detect.model", "detect.os", "detect.type")):
+        indicators.append("missing_detect_metadata")
+    if "macVendor" not in summary:
+        indicators.append("missing_mac_vendor")
+
+    categories = alarm_context.get("categories") if isinstance(alarm_context.get("categories"), dict) else {}
+    if categories.get("review_network_security"):
+        indicators.append("network_security_alarm")
+    if categories.get("review_bandwidth"):
+        indicators.append("bandwidth_alarm")
+    if categories.get("unknown_review"):
+        indicators.append("unknown_alarm_type")
+    return indicators
+
+
+def build_active_devices_payload(
+    devices_payload: dict[str, object],
+    alarms_payload: dict[str, object] | None = None,
+    *,
+    since_days: int = 7,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    devices = devices_payload.get("devices") if isinstance(devices_payload.get("devices"), list) else []
+    now_ts = (now or datetime.now(UTC)).timestamp()
+    cutoff = now_ts - since_days * 24 * 60 * 60
+    alarm_context = alarm_context_by_device_index(alarms_payload, devices_payload) if alarms_payload else {}
+
+    active: list[dict[str, object]] = []
+    excluded_counts: list[str] = []
+    for index, device in enumerate(devices):
+        if not isinstance(device, dict):
+            continue
+        last_active = device_last_active(device)
+        if last_active is None:
+            excluded_counts.append("missing_last_active")
+            continue
+        if last_active < cutoff:
+            excluded_counts.append("outside_window")
+            continue
+
+        device_id = device_display_id(device, f"<device-index:{index}>")
+        summary = device_summary_fields(device)
+        context = alarm_context.get(index, {"alarm_count": 0, "categories": {}, "types": {}, "latest_alarm_timestamp": None})
+        active.append(
+            {
+                "device_key": device.get("redis_key") or f"<device-index:{index}>",
+                "device_id": device_id,
+                "last_active_timestamp": last_active,
+                "last_active_age_days": round((now_ts - last_active) / (24 * 60 * 60), 3),
+                "device_summary": summary,
+                "alarm_context": context,
+                "investigation_indicators": active_device_indicators(summary, context),
+            }
+        )
+
+    active.sort(
+        key=lambda item: (
+            -int(item["alarm_context"].get("alarm_count", 0)) if isinstance(item.get("alarm_context"), dict) else 0,
+            float(item.get("last_active_timestamp") or 0) * -1,
+            str(item.get("device_id")),
+        )
+    )
+    return {
+        "active_devices": active,
+        "summary": {
+            "total_devices": len(devices),
+            "active_device_count": len(active),
+            "excluded_counts": bucket_counts(excluded_counts),
+            "indicator_counts": bucket_counts(indicator for device in active for indicator in device.get("investigation_indicators", [])),
+            "devices_with_alarms": sum(1 for device in active if int(device.get("alarm_context", {}).get("alarm_count", 0)) > 0),
+        },
+        "collection": {
+            "source": "local_artifact_join",
+            "since_days": since_days,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "devices": devices_payload.get("collection", {}),
+            "alarms": alarms_payload.get("collection", {}) if alarms_payload else None,
+        },
+        "limitations": [
+            "Active status uses Firewalla host lastActiveTimestamp and the requested local time window.",
+            "Alarm context uses the same source-only attribution rules as the attribute command.",
+            "Investigation indicators are triage hints, not proof that a device is malicious.",
+        ],
+    }
+
+
 def attribute_alarms_to_devices(alarms_payload: dict[str, object], devices_payload: dict[str, object]) -> dict[str, object]:
     alarms = alarms_payload.get("alarms") if isinstance(alarms_payload.get("alarms"), list) else []
     devices = devices_payload.get("devices") if isinstance(devices_payload.get("devices"), list) else []
@@ -1037,6 +1174,21 @@ def cmd_attribute(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_active_devices(args: argparse.Namespace) -> int:
+    devices = load_json(args.devices)
+    alarms = load_json(args.alarms) if args.alarms else None
+    if not isinstance(devices, dict):
+        raise SystemExit("active-devices --devices input must be a JSON object")
+    if alarms is not None and not isinstance(alarms, dict):
+        raise SystemExit("active-devices --alarms input must be a JSON object")
+    payload = build_active_devices_payload(devices, alarms, since_days=args.since_days)
+    if args.output:
+        write_json(Path(args.output), payload)
+    else:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    return 0
+
+
 def cmd_resolve_device(args: argparse.Namespace) -> int:
     target = env_target(args)
     remote = "keys=$(redis-cli --raw --scan --pattern 'host:mac:*'); for key in $keys; do echo __FIREWALLA_KEY__$key; redis-cli --raw HGETALL \"$key\"; done"
@@ -1174,6 +1326,13 @@ def build_parser() -> argparse.ArgumentParser:
     attribute.add_argument("--devices", required=True, help="devices JSON from firewalla-skill devices --json")
     attribute.add_argument("--output", help="write attribution JSON to this path")
     attribute.set_defaults(func=cmd_attribute)
+
+    active_devices = subparsers.add_parser("active-devices", help="join device inventory and alarms into active-device investigation context")
+    active_devices.add_argument("--devices", required=True, help="devices JSON from firewalla-skill devices --json")
+    active_devices.add_argument("--alarms", help="optional alarms JSON from firewalla-skill alarms --json")
+    active_devices.add_argument("--since-days", type=int, default=7, help="active-device window based on lastActiveTimestamp")
+    active_devices.add_argument("--output", help="write active-device investigation JSON to this path")
+    active_devices.set_defaults(func=cmd_active_devices)
 
     resolve_device = subparsers.add_parser("resolve-device", help="resolve an anonymous token to matching Firewalla device records")
     add_common_args(resolve_device)
