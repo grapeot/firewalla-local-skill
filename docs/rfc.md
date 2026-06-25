@@ -161,6 +161,19 @@ The first stable schema is intentionally compact:
 
 The summary is deterministic and does not call an LLM. It is a compact analysis substrate, not the final natural-language report.
 
+## Alarm Clustering And Ignore Strategy
+
+`cluster` groups redacted alarm artifacts into first-pass actionability categories:
+
+1. `routine_noise`: game/video category alarms that often represent expected household behavior
+2. `review_bandwidth`: large upload or abnormal bandwidth alarms that need device/time context
+3. `review_network_security`: low-volume network/security alarms that should not be bulk-ignored
+4. `unknown_review`: any unclassified alarm type
+
+The output includes cluster counts, type mapping, top active hours, and recommendations. It is explicitly read-only.
+
+Alert-noise handling should not default to creating network rules. Network rules change traffic behavior; most routine game/video alarms are notification or visibility noise. Future write support should first target official/app-supported alarm or notification tuning. Direct Redis writes are out of scope.
+
 ## Full Inventory And Alarm Windows
 
 The CLI must cover the common analysis question directly: all known devices and all alarms in a recent window. Agents should not need one-off scripts for this path.
@@ -191,6 +204,8 @@ Private aliases belong outside the public repo. A user's local machine may use `
 ## Write Operations
 
 Rule creation, pause/resume, target list updates, alarm deletion, and other mutations are explicitly out of MVP. They require a separate RFC section and dry-run behavior.
+
+For ignoring alarms, the preferred future write path is alarm/notification tuning through an official MSP API or local Encipher API, not traffic rules. Create traffic rules only when the desired behavior is to allow, block, route, or limit traffic.
 
 ## Fallbacks
 

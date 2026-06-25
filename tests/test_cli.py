@@ -7,6 +7,7 @@ from firewalla_skill.cli import (
     build_redis_command,
     build_redis_raw_command,
     build_ssh_command,
+    cluster_alarms_payload,
     main,
     load_local_config,
     pair_lines_to_dict,
@@ -132,3 +133,21 @@ def test_summarize_snapshot_counts_p0_surfaces():
     assert summary["counts"] == {"devices": 1, "alarms": 1, "flows": 1}
     assert summary["alarm_types"] == {"ALARM_GAME": 1}
     assert summary["flow_top_ports"] == {"443": 1}
+
+
+def test_cluster_alarms_payload_classifies_actionability():
+    payload = {
+        "alarms": [
+            {"source": "alarm_active", "alarm": {"type": "ALARM_GAME", "state": "active", "timestamp": 1700000000}},
+            {"source": "alarm_active", "alarm": {"type": "ALARM_LARGE_UPLOAD", "state": "active", "timestamp": 1700000100}},
+            {"source": "alarm_active", "alarm": {"type": "ALARM_INTEL", "state": "active", "timestamp": 1700000200}},
+        ],
+        "collection": {"redacted": True},
+    }
+    clustered = cluster_alarms_payload(payload)
+    assert clustered["clusters"]["by_category"] == {
+        "review_bandwidth": 1,
+        "review_network_security": 1,
+        "routine_noise": 1,
+    }
+    assert clustered["ignore_guidance"]["create_network_rules_for_alert_noise"] is False

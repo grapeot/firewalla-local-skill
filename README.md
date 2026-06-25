@@ -103,6 +103,7 @@ Current commands:
 5. `snapshot`: bounded redacted JSON snapshot for AI reasoning
 6. `dump-format`: bounded local raw/redacted dump for format discovery
 7. `summary`: compact JSON situation summary from a snapshot or live bounded read
+8. `cluster`: redacted alarm clustering with read-only ignore recommendations
 
 Local format dump:
 
@@ -131,6 +132,12 @@ All devices and last-three-days alarms:
 ```bash
 firewalla-skill devices --execute --all --json --output reports/devices_all_latest.json
 firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
+```
+
+Cluster recent alarms:
+
+```bash
+firewalla-skill cluster --alarms reports/alarms_last3d_latest.json --output reports/alarms_last3d_cluster.json
 ```
 
 ## Test Tiers
