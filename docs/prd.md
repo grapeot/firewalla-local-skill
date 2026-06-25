@@ -18,7 +18,7 @@ A Firewalla Gold/Gold Plus owner who wants AI-assisted network visibility, alert
 
 1. Dump representative local Redis data formats for devices, alarms, flows, and system health without committing private data.
 2. Identify which fields are stable, high-signal, and safe to summarize.
-3. Provide stable read-only CLI commands that emit redacted JSON snapshots.
+3. Provide stable read-only CLI commands that emit private-by-default local JSON snapshots, with an explicit redacted mode for sharing.
 4. Document local access paths and keep the official MSP API as a paid optional path.
 5. Keep all examples fake and publishable.
 
@@ -36,6 +36,7 @@ A Firewalla Gold/Gold Plus owner who wants AI-assisted network visibility, alert
 3. The first implementation can collect basic local status without requiring a paid MSP API plan.
 4. The MVP performs no mutation on the Firewalla box.
 5. The project has one sanitized format report showing what Firewalla local Redis data looks like and what fields we will use.
+6. Local reports are useful to the user without reverse-mapping anonymous tokens by default.
 
 ## Product Value Hypothesis
 
@@ -48,7 +49,7 @@ The CLI should therefore prioritize facts that help an agent answer household-ne
 3. Which devices or flows changed recently in a way that looks unusual?
 4. Is the Firewalla box healthy enough that its observations are trustworthy?
 5. What policies/rules exist, but only as read-only context for now?
-6. Which small set of anonymous devices explains most alert volume?
+6. Which small set of devices explains most alert volume?
 
 ## Information Priority
 
@@ -83,7 +84,7 @@ The next concrete deliverable should be a local-only format dump report, stored 
 1. Which Redis keys exist on this box for P0 surfaces?
 2. What does one representative record look like for each surface?
 3. Which fields look stable and useful?
-4. Which fields are sensitive and must be redacted?
+4. Which fields are sensitive and must be redacted before sharing outside the local machine?
 5. Which fields should become the first JSON snapshot schema?
 
 The public repo should only keep a sanitized summary and fake examples.
@@ -101,27 +102,28 @@ The first stable output should be a compact object with these top-level sections
   "flows_summary": {},
   "collection": {
     "source": "ssh_redis",
-    "redacted": true
+    "privacy": "private",
+    "redacted": false
   }
 }
 ```
 
-This is intentionally smaller than Firewalla's raw data. The product should preserve the fields needed for AI reasoning and hide fields that only increase privacy risk.
+This is intentionally smaller than Firewalla's raw data. The product should preserve fields needed for AI reasoning. Local output defaults to `private`; users can request `--privacy redacted` when preparing public-safe artifacts.
 
 ## Device Cleanup And Attribution
 
-The MVP should treat device cleanup and alarm attribution as first-class read-only analysis. Redaction must preserve stable anonymous tokens, such as `<mac:...>` or `<bname:...>`, so reports can join devices and alarms without exposing raw identifiers.
+The MVP should treat device cleanup and alarm attribution as first-class read-only analysis. Local attribution should show readable device summaries, including names, IPs, MACs, vendor/type, and last-active fields when available. Redacted artifacts must preserve stable anonymous tokens, such as `<mac:...>` or `<bname:...>`, so public-safe reports can still join devices and alarms without exposing raw identifiers.
 
 Required outputs:
 
 1. current-vs-historical device buckets by last active timestamp
 2. device type distribution and missing classification count
-3. alarm counts attributed to anonymous device IDs using Firewalla source fields, not arbitrary token overlap
+3. alarm counts attributed to source devices using Firewalla source fields, not arbitrary token overlap
 4. top noisy devices and top review-worthy devices
 
 Alarm attribution must preserve Firewalla payload semantics. Source/client fields such as `device`, `p.device.id`, `p.device.ip`, `p.device.mac`, `p.device.name`, and `p.flows[].device` are candidates for device attribution. Infrastructure/interface fields such as `p.intf.id`, `p.intf.name`, `p.intf.subnet`, and `p.intf.subnet6` describe where Firewalla observed the event; they must not cause an alarm to be attributed to the Firewalla gateway itself.
 
-`resolve-device` is a diagnostic and human lookup helper. It is useful when a user wants to map an anonymous token to a local Firewalla App-visible record, but it is not the primary mechanism for understanding alarm source. If attribution frequently points to Firewalla itself, the parser is likely using the wrong alarm fields.
+`resolve-device` is a diagnostic and redacted-artifact lookup helper. It is useful when a user wants to map an anonymous token to a local Firewalla App-visible record, but normal private reports should already include readable device identity. If attribution frequently points to Firewalla itself, the parser is likely using the wrong alarm fields.
 
 ## Open Questions
 
@@ -129,11 +131,11 @@ MSP Lite shows API/Integration as locked. Current public pricing indicates API/I
 
 Data questions to answer with the format dump:
 
-1. Which host fields reliably identify a device without needing private names?
+1. Which host fields reliably identify a device in private mode and in redacted mode?
 2. Are alarm payloads self-contained, or do they require joining host/flow/detail keys?
 3. Are flow records compact enough for direct JSON output, or should the MVP only emit aggregates?
 4. Which rule/policy keys are safe to read and useful for explanation?
-5. Can we produce useful snapshots without exposing local IPs, MACs, domains, or device names by default?
+5. Can we produce useful redacted snapshots for sharing while keeping local snapshots private-by-default?
 
 ## Preferred MVP Access Path
 

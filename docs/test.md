@@ -22,6 +22,8 @@ Use fake fixtures and dry-runs for:
 9. device-summary and alarm-to-device attribution outputs
 10. preservation of Firewalla schema keys such as `p.device.ip` while redacting sensitive values
 11. source-aware alarm attribution that uses `p.device.*` / `p.flows[].device` and excludes `p.intf.*` infrastructure fields
+12. private-by-default JSON output with explicit `--privacy redacted` export mode
+13. readable `device_summary` in attribution output for private inputs
 
 ## Live Tests
 
@@ -42,7 +44,7 @@ Live tests must start with `firewalla-skill health --execute` only. Any write op
 
 Live read-only alarm tests must cover `alarms --since-days 3 --include-archive --all --json` to verify active/archive candidate collection and payload timestamp filtering.
 
-Live read-only report tests must cover `device-summary` and `attribute` on live redacted artifacts to verify device cleanup and source-aware alarm attribution remain usable without raw identifiers.
+Live read-only report tests must cover `device-summary` and `attribute` on live private artifacts to verify device cleanup and source-aware alarm attribution produce readable device summaries. Live tests should also exercise `--privacy redacted` for at least one bounded artifact.
 
 Optional MSP API tests are separate and only apply when a paid MSP token is available.
 
@@ -52,4 +54,4 @@ Optional MSP API tests are separate and only apply when a paid MSP token is avai
 
 ## Privacy Check
 
-Before publishing, scan for real credentials, private domains, local IPs, MAC addresses, device names, alarm payloads, flow payloads, and password-manager references.
+Before publishing, scan tracked files for real credentials, private domains, local IPs, MAC addresses, device names, alarm payloads, flow payloads, and password-manager references. Private local artifacts are allowed only under ignored paths such as `reports/` and `.firewalla_dumps/`.

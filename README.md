@@ -8,7 +8,7 @@ Early but runnable CLI. The implementation target is local-first read-only acces
 
 ## Privacy
 
-This repository is designed to be publishable. Operational privacy rules live in `AGENTS.md` and `skills/firewalla.md`.
+This repository is designed to be publishable; checked-in examples and tests are fake or redacted. Local CLI JSON output is private by default so an AI running on the user's machine can see real device names, IPs, MACs, domains, and alarm messages. Use `--privacy redacted` only when preparing an artifact for sharing or publication. Operational privacy rules live in `AGENTS.md` and `skills/firewalla.md`.
 
 ## Install This Skill Into An AI Workspace
 
@@ -100,13 +100,13 @@ Current commands:
 2. `devices`: Redis device records from `host:mac:*`, including `--all --json`
 3. `alarms`: active/recent alarm records, including `--since-days` and `--include-archive --json`
 4. `flows`: Redis `ZREVRANGE` for `flow:conn:system` or a MAC-specific flow key
-5. `snapshot`: bounded redacted JSON snapshot for AI reasoning
+5. `snapshot`: bounded JSON snapshot for AI reasoning
 6. `dump-format`: bounded local raw/redacted dump for format discovery
 7. `summary`: compact JSON situation summary from a snapshot or live bounded read
-8. `cluster`: redacted alarm clustering with read-only ignore recommendations
+8. `cluster`: alarm clustering with read-only ignore recommendations
 9. `device-summary`: current-vs-historical device inventory cleanup
-10. `attribute`: redacted alarm-to-device attribution with stable anonymous IDs
-11. `resolve-device`: map an anonymous device token to matching device records, redacted by default
+10. `attribute`: alarm-to-device attribution with readable device summaries
+11. `resolve-device`: map an anonymous device token to matching device records for diagnostics
 
 Local format dump:
 
@@ -137,6 +137,13 @@ firewalla-skill devices --execute --all --json --output reports/devices_all_late
 firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
 ```
 
+Those local report artifacts are private by default and should stay under ignored `reports/`. For a public-safe artifact, add `--privacy redacted`:
+
+```bash
+firewalla-skill devices --execute --all --json --privacy redacted --output reports/devices_all_redacted.json
+firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --privacy redacted --output reports/alarms_last3d_redacted.json
+```
+
 Cluster recent alarms:
 
 ```bash
@@ -150,13 +157,13 @@ firewalla-skill device-summary --devices reports/devices_all_latest.json --outpu
 firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices reports/devices_all_latest.json --output reports/alarm_device_attribution_latest.json
 ```
 
-Resolve an anonymous device token when a human needs to locate or verify it:
+Resolve an anonymous device token from a redacted artifact when a human needs to locate or verify it:
 
 ```bash
 firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --output reports/device_resolve_latest.json
 ```
 
-By default this remains redacted and suitable for AI analysis. `resolve-device` is a lookup/diagnostic helper, not the primary alarm parser. To locate the device in your own Firewalla App, explicitly include private local fields and keep the output in ignored `reports/`:
+`resolve-device` is only needed for redacted artifacts or diagnostics. Normal private reports should already include readable device summaries. To locate a redacted token in your own Firewalla App, explicitly include private local fields and keep the output in ignored `reports/`:
 
 ```bash
 firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --include-private --output reports/private_device_resolve_latest.json

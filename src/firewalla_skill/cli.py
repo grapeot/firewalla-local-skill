@@ -30,6 +30,7 @@ READ_ONLY_REDIS_COMMANDS = {
 DEFAULT_SSH_USER = "pi"
 LOCAL_CONFIG = ".firewalla.local.json"
 DEFAULT_DUMP_DIR = ".firewalla_dumps"
+PRIVACY_CHOICES = ("private", "redacted")
 SENSITIVE_STRING_KEYS = {
     "device",
     "name",
@@ -235,6 +236,18 @@ def redacted_json_value(value: object, key_hint: str | None = None) -> object:
     return value
 
 
+def apply_privacy(value: object, privacy: str) -> object:
+    if privacy == "redacted":
+        return redacted_json_value(value)
+    if privacy == "private":
+        return value
+    raise ValueError(f"unknown privacy mode: {privacy}")
+
+
+def privacy_metadata(privacy: str) -> dict[str, object]:
+    return {"privacy": privacy, "redacted": privacy == "redacted", "private": privacy == "private"}
+
+
 def pair_lines_to_dict(lines: list[str]) -> dict[str, object]:
     result: dict[str, object] = {}
     for index in range(0, len(lines) - 1, 2):
@@ -341,7 +354,7 @@ def split_lines(text: str) -> list[str]:
     return text.splitlines()
 
 
-def collect_health(target: SshTarget, *, execute: bool) -> tuple[dict[str, object], list[dict[str, object]]]:
+def collect_health(target: SshTarget, *, execute: bool, privacy: str = "private") -> tuple[dict[str, object], list[dict[str, object]]]:
     commands = {
         "hostname": "hostname",
         "uptime": "uptime",
@@ -354,10 +367,10 @@ def collect_health(target: SshTarget, *, execute: bool) -> tuple[dict[str, objec
         raw.append({"name": name, "command": command, "returncode": code, "stdout": stdout, "stderr": stderr})
         if execute and code == 0:
             box[name] = stdout.strip()
-    return redacted_json_value(box), raw
+    return apply_privacy(box, privacy), raw
 
 
-def collect_devices(target: SshTarget, *, execute: bool, limit: int | None) -> tuple[list[object], list[dict[str, object]]]:
+def collect_devices(target: SshTarget, *, execute: bool, limit: int | None, privacy: str = "private") -> tuple[list[object], list[dict[str, object]]]:
     key_command = "redis-cli --raw --scan --pattern 'host:mac:*'"
     if limit is not None:
         key_command += " | head -n " + shlex.quote(str(limit))
@@ -380,7 +393,7 @@ def collect_devices(target: SshTarget, *, execute: bool, limit: int | None) -> t
             current_lines.append(line)
     if current_key:
         devices.append({"redis_key": current_key, "fields": pair_lines_to_dict(current_lines)})
-    return redacted_json_value(devices), raw
+    return apply_privacy(devices, privacy), raw
 
 
 def collect_alarms(
@@ -391,6 +404,7 @@ def collect_alarms(
     since_days: int | None = None,
     include_archive: bool = False,
     candidate_limit: int | None = 2000,
+    privacy: str = "private",
 ) -> tuple[list[object], list[dict[str, object]]]:
     sources = ["alarm_active"]
     if include_archive:
@@ -454,10 +468,10 @@ def collect_alarms(
     alarms = filter_alarms_since(alarms, since_days)
     if limit is not None and since_days is not None:
         alarms = alarms[:limit]
-    return redacted_json_value(alarms), raw
+    return apply_privacy(alarms, privacy), raw
 
 
-def collect_flows(target: SshTarget, *, execute: bool, limit: int) -> tuple[list[object], dict[str, object], list[dict[str, object]]]:
+def collect_flows(target: SshTarget, *, execute: bool, limit: int, privacy: str = "private") -> tuple[list[object], dict[str, object], list[dict[str, object]]]:
     remote = build_redis_raw_command(["ZREVRANGE", "flow:conn:system", "0", str(limit - 1), "WITHSCORES"])
     code, stdout, stderr, command = capture_remote(target, remote, execute=execute)
     raw = [{"name": "flows", "command": command, "returncode": code, "stdout": stdout, "stderr": stderr}]
@@ -465,7 +479,7 @@ def collect_flows(target: SshTarget, *, execute: bool, limit: int) -> tuple[list
         return [], {"sample_count": 0}, raw
     flows = zrange_with_scores_to_pairs(split_lines(stdout))
     summary = {"sample_count": len(flows), "source_key": "flow:conn:system"}
-    return redacted_json_value(flows), summary, raw
+    return apply_privacy(flows, privacy), summary, raw
 
 
 def write_json(path: Path, payload: object) -> None:
@@ -489,17 +503,57 @@ def extract_tokens(value: object) -> set[str]:
     return set(TOKEN_PATTERN.findall(json.dumps(value, sort_keys=True)))
 
 
+def value_identity_tokens(field: str, value: object) -> set[str]:
+    tokens = extract_tokens(value)
+    if isinstance(value, str):
+        tokens.update(field_tokens(field, value))
+        if value.strip():
+            tokens.add(value.strip().lower())
+    return tokens
+
+
+def device_identity_tokens(device: dict[str, object]) -> set[str]:
+    fields = device.get("fields") if isinstance(device.get("fields"), dict) else {}
+    tokens = extract_tokens(device)
+    for field, value in fields.items():
+        tokens.update(value_identity_tokens(str(field), value))
+    return tokens
+
+
+def device_display_id(device: dict[str, object], fallback: str) -> str:
+    fields = device.get("fields") if isinstance(device.get("fields"), dict) else {}
+    for key in ("bname", "name", "pname", "bonjourName", "dhcpName", "ipv4", "ipv4Addr", "mac"):
+        value = fields.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    tokens = sorted(extract_tokens(device))
+    return tokens[0] if tokens else fallback
+
+
+def device_summary_fields(device: dict[str, object]) -> dict[str, object]:
+    fields = device.get("fields") if isinstance(device.get("fields"), dict) else {}
+    detect = fields.get("detect") if isinstance(fields.get("detect"), dict) else {}
+    summary: dict[str, object] = {}
+    for key in ("bname", "name", "pname", "bonjourName", "dhcpName", "ipv4", "ipv4Addr", "mac", "macVendor", "localDomain", "lastActiveTimestamp"):
+        if key in fields:
+            summary[key] = fields[key]
+    for key in ("brand", "model", "os", "type"):
+        if key in detect:
+            summary[f"detect.{key}"] = detect[key]
+    return summary
+
+
 def extract_alarm_source_tokens(alarm: dict[str, object]) -> set[str]:
     payload = alarm.get("alarm") if isinstance(alarm.get("alarm"), dict) else {}
     tokens: set[str] = set()
     for key, value in payload.items():
         if str(key).lower() in ALARM_DEVICE_KEYS:
-            tokens.update(extract_tokens(value))
+            tokens.update(value_identity_tokens(str(key), value))
     flows = payload.get("p.flows")
     if isinstance(flows, list):
         for flow in flows:
             if isinstance(flow, dict) and "device" in flow:
-                tokens.update(extract_tokens(flow["device"]))
+                tokens.update(value_identity_tokens("device", flow["device"]))
     return tokens
 
 
@@ -538,19 +592,17 @@ def summarize_devices_payload(payload: dict[str, object], now: datetime | None =
         else:
             detect_types.append(None)
         last_from.append(fields.get("lastFrom"))
-        if extract_tokens(device):
+        if isinstance(device, dict) and device_identity_tokens(device):
             tokenized_devices += 1
 
-    return redacted_json_value(
-        {
-            "total_devices": len(devices),
-            "activity_buckets": bucket_counts(activity),
-            "detect_types": bucket_counts(detect_types),
-            "last_from": bucket_counts(last_from),
-            "tokenized_devices": tokenized_devices,
-            "collection": payload.get("collection", {}),
-        }
-    )
+    return {
+        "total_devices": len(devices),
+        "activity_buckets": bucket_counts(activity),
+        "detect_types": bucket_counts(detect_types),
+        "last_from": bucket_counts(last_from),
+        "identity_indexed_devices": tokenized_devices,
+        "collection": payload.get("collection", {}),
+    }
 
 
 def attribute_alarms_to_devices(alarms_payload: dict[str, object], devices_payload: dict[str, object]) -> dict[str, object]:
@@ -559,9 +611,11 @@ def attribute_alarms_to_devices(alarms_payload: dict[str, object], devices_paylo
 
     device_index: list[dict[str, object]] = []
     for index, device in enumerate(devices):
-        tokens = extract_tokens(device)
-        primary = sorted(tokens)[0] if tokens else f"<device-index:{index}>"
-        device_index.append({"id": primary, "tokens": tokens})
+        if not isinstance(device, dict):
+            continue
+        tokens = device_identity_tokens(device)
+        primary = device_display_id(device, f"<device-index:{index}>")
+        device_index.append({"id": primary, "tokens": tokens, "summary": device_summary_fields(device)})
 
     attributed: dict[str, dict[str, object]] = {}
     unattributed = 0
@@ -584,7 +638,10 @@ def attribute_alarms_to_devices(alarms_payload: dict[str, object], devices_paylo
             continue
         # Attribute each alarm to the first matching anonymized device to avoid double counting.
         device_id = str(matches[0]["id"])
-        item = attributed.setdefault(device_id, {"device_id": device_id, "alarm_count": 0, "categories": {}, "types": {}})
+        item = attributed.setdefault(
+            device_id,
+            {"device_id": device_id, "device_summary": matches[0].get("summary", {}), "alarm_count": 0, "categories": {}, "types": {}},
+        )
         item["alarm_count"] = int(item["alarm_count"]) + 1
         item["categories"][category] = item["categories"].get(category, 0) + 1
         item["types"][alarm_type] = item["types"].get(alarm_type, 0) + 1
@@ -599,7 +656,7 @@ def attribute_alarms_to_devices(alarms_payload: dict[str, object], devices_paylo
         "type_counts": bucket_counts(type_counts),
         "top_devices": devices_ranked[:20],
         "limitations": [
-            "Attribution uses stable redacted tokens from source-like alarm fields such as device, p.device.*, and p.flows[].device.",
+            "Attribution uses identity values from source-like alarm fields such as device, p.device.*, and p.flows[].device.",
             "Infrastructure fields such as p.intf.* are intentionally excluded to avoid attributing alarms to the Firewalla gateway itself.",
             "If Firewalla alarm payloads omit source device tokens, those alarms remain unattributed.",
         ],
@@ -672,7 +729,7 @@ def summarize_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
         "next_questions": next_questions,
         "collection": snapshot.get("collection", {}),
     }
-    return redacted_json_value(summary)
+    return summary
 
 
 ALARM_CATEGORY = {
@@ -765,33 +822,31 @@ def cluster_alarms_payload(payload: dict[str, object]) -> dict[str, object]:
         "why": "Network rules change traffic behavior. Most game/video alarms are notification noise, not evidence that traffic should be blocked.",
     }
 
-    return redacted_json_value(
-        {
-            "total_alarms": total,
-            "clusters": {
-                "by_category": category_counts,
-                "by_type": type_counts,
-                "by_state": dict(sorted(state_counts.items(), key=lambda item: (-item[1], item[0]))),
-                "by_source": dict(sorted(source_counts.items(), key=lambda item: (-item[1], item[0]))),
-                "top_hours": top_hours,
-            },
-            "type_to_category": dict(sorted(type_to_category.items())),
-            "recommendations": recommendations,
-            "ignore_guidance": ignore_guidance,
-            "limitations": [
-                "This cluster uses redacted alarm artifacts and does not yet join alarms to stable anonymized device IDs.",
-                "Recommendations are read-only and should be reviewed before any Firewalla configuration change.",
-            ],
-            "collection": payload.get("collection", {}),
-        }
-    )
+    return {
+        "total_alarms": total,
+        "clusters": {
+            "by_category": category_counts,
+            "by_type": type_counts,
+            "by_state": dict(sorted(state_counts.items(), key=lambda item: (-item[1], item[0]))),
+            "by_source": dict(sorted(source_counts.items(), key=lambda item: (-item[1], item[0]))),
+            "top_hours": top_hours,
+        },
+        "type_to_category": dict(sorted(type_to_category.items())),
+        "recommendations": recommendations,
+        "ignore_guidance": ignore_guidance,
+        "limitations": [
+            "This cluster uses the input alarm artifact privacy mode and does not mutate Firewalla.",
+            "Recommendations are read-only and should be reviewed before any Firewalla configuration change.",
+        ],
+        "collection": payload.get("collection", {}),
+    }
 
 
-def build_snapshot(target: SshTarget, *, execute: bool, limit: int) -> tuple[dict[str, object], list[dict[str, object]]]:
-    box, raw_health = collect_health(target, execute=execute)
-    devices, raw_devices = collect_devices(target, execute=execute, limit=limit)
-    alarms, raw_alarms = collect_alarms(target, execute=execute, limit=limit)
-    flows, flows_summary, raw_flows = collect_flows(target, execute=execute, limit=limit)
+def build_snapshot(target: SshTarget, *, execute: bool, limit: int, privacy: str = "private") -> tuple[dict[str, object], list[dict[str, object]]]:
+    box, raw_health = collect_health(target, execute=execute, privacy=privacy)
+    devices, raw_devices = collect_devices(target, execute=execute, limit=limit, privacy=privacy)
+    alarms, raw_alarms = collect_alarms(target, execute=execute, limit=limit, privacy=privacy)
+    flows, flows_summary, raw_flows = collect_flows(target, execute=execute, limit=limit, privacy=privacy)
     snapshot = {
         "box": box,
         "devices": devices,
@@ -800,7 +855,7 @@ def build_snapshot(target: SshTarget, *, execute: bool, limit: int) -> tuple[dic
         "flows_summary": flows_summary,
         "collection": {
             "source": "ssh_redis",
-            "redacted": True,
+            **privacy_metadata(privacy),
             "generated_at": datetime.now(UTC).isoformat(),
             "limit": limit,
         },
@@ -823,11 +878,11 @@ def cmd_health(args: argparse.Namespace) -> int:
 def cmd_devices(args: argparse.Namespace) -> int:
     target = env_target(args)
     if args.json:
-        devices, _raw = collect_devices(target, execute=args.execute, limit=None if args.all else args.count)
+        devices, _raw = collect_devices(target, execute=args.execute, limit=None if args.all else args.count, privacy=args.privacy)
         if not args.execute:
             print(json.dumps({"dry_run": True, "message": "devices --json requires --execute to collect data"}, indent=2))
             return 0
-        payload = {"devices": devices, "collection": {"source": "ssh_redis", "redacted": True, "all": args.all, "limit": None if args.all else args.count}}
+        payload = {"devices": devices, "collection": {"source": "ssh_redis", **privacy_metadata(args.privacy), "all": args.all, "limit": None if args.all else args.count}}
         if args.output:
             write_json(Path(args.output), payload)
         else:
@@ -847,6 +902,7 @@ def cmd_alarms(args: argparse.Namespace) -> int:
             since_days=args.since_days,
             include_archive=args.include_archive,
             candidate_limit=args.candidate_limit,
+            privacy=args.privacy,
         )
         if not args.execute:
             print(json.dumps({"dry_run": True, "message": "alarms --json requires --execute to collect data"}, indent=2))
@@ -855,7 +911,7 @@ def cmd_alarms(args: argparse.Namespace) -> int:
             "alarms": alarms,
             "collection": {
                 "source": "ssh_redis",
-                "redacted": True,
+                **privacy_metadata(args.privacy),
                 "all": args.all,
                 "limit": None if args.all else args.limit,
                 "since_days": args.since_days,
@@ -881,7 +937,7 @@ def cmd_flows(args: argparse.Namespace) -> int:
 
 def cmd_snapshot(args: argparse.Namespace) -> int:
     target = env_target(args)
-    snapshot, _raw = build_snapshot(target, execute=args.execute, limit=args.limit)
+    snapshot, _raw = build_snapshot(target, execute=args.execute, limit=args.limit, privacy=args.privacy)
     if not args.execute:
         dry_run = {"dry_run": True, "message": "snapshot requires --execute to collect data", "snapshot": snapshot}
         print(json.dumps(dry_run, indent=2, sort_keys=True))
@@ -895,7 +951,7 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
 def cmd_dump_format(args: argparse.Namespace) -> int:
     target = env_target(args)
-    snapshot, raw = build_snapshot(target, execute=args.execute, limit=args.limit)
+    snapshot, raw = build_snapshot(target, execute=args.execute, limit=args.limit, privacy="redacted")
     if not args.execute:
         print(json.dumps({"dry_run": True, "message": "dump-format requires --execute to collect local data"}, indent=2))
         return 0
@@ -920,7 +976,7 @@ def cmd_summary(args: argparse.Namespace) -> int:
         if not args.execute:
             print(json.dumps({"dry_run": True, "message": "summary needs --input or --execute"}, indent=2))
             return 0
-        snapshot, _raw = build_snapshot(target, execute=True, limit=args.limit)
+        snapshot, _raw = build_snapshot(target, execute=True, limit=args.limit, privacy=args.privacy)
         summary = summarize_snapshot(snapshot)
 
     if args.output:
@@ -1042,7 +1098,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_args(devices)
     devices.add_argument("--count", type=int, default=100, help="Redis SCAN count hint")
     devices.add_argument("--all", action="store_true", help="collect all device records when used with --json")
-    devices.add_argument("--json", action="store_true", help="emit parsed redacted JSON instead of raw Redis output")
+    devices.add_argument("--json", action="store_true", help="emit parsed JSON instead of raw Redis output")
+    devices.add_argument("--privacy", choices=PRIVACY_CHOICES, default="private", help="JSON privacy mode; default keeps local data private but readable")
     devices.add_argument("--output", help="write JSON output to this path")
     devices.set_defaults(func=cmd_devices)
 
@@ -1053,7 +1110,8 @@ def build_parser() -> argparse.ArgumentParser:
     alarms.add_argument("--since-days", type=int, help="collect alarms newer than this many days when used with --json")
     alarms.add_argument("--candidate-limit", type=int, default=2000, help="candidate IDs to inspect before payload timestamp filtering")
     alarms.add_argument("--include-archive", action="store_true", help="include alarm_archive in addition to alarm_active")
-    alarms.add_argument("--json", action="store_true", help="emit parsed redacted JSON instead of raw Redis output")
+    alarms.add_argument("--json", action="store_true", help="emit parsed JSON instead of raw Redis output")
+    alarms.add_argument("--privacy", choices=PRIVACY_CHOICES, default="private", help="JSON privacy mode; default keeps local data private but readable")
     alarms.add_argument("--output", help="write JSON output to this path")
     alarms.set_defaults(func=cmd_alarms)
 
@@ -1065,10 +1123,11 @@ def build_parser() -> argparse.ArgumentParser:
     flows.add_argument("--limit", type=int, default=20, help="maximum flow records")
     flows.set_defaults(func=cmd_flows)
 
-    snapshot = subparsers.add_parser("snapshot", help="emit a redacted AI-readable JSON snapshot")
+    snapshot = subparsers.add_parser("snapshot", help="emit an AI-readable JSON snapshot")
     add_common_args(snapshot)
     snapshot.add_argument("--limit", type=int, default=5, help="bounded sample size per surface")
-    snapshot.add_argument("--output", help="write redacted JSON snapshot to this path")
+    snapshot.add_argument("--privacy", choices=PRIVACY_CHOICES, default="private", help="JSON privacy mode; default keeps local data private but readable")
+    snapshot.add_argument("--output", help="write JSON snapshot to this path")
     snapshot.set_defaults(func=cmd_snapshot)
 
     dump_format = subparsers.add_parser("dump-format", help="write local raw and redacted bounded format dumps")
@@ -1077,27 +1136,28 @@ def build_parser() -> argparse.ArgumentParser:
     dump_format.add_argument("--output-dir", default=DEFAULT_DUMP_DIR, help="git-ignored local dump directory")
     dump_format.set_defaults(func=cmd_dump_format)
 
-    summary = subparsers.add_parser("summary", help="summarize a redacted snapshot for AI analysis")
+    summary = subparsers.add_parser("summary", help="summarize a snapshot for AI analysis")
     add_common_args(summary)
-    summary.add_argument("--input", help="read an existing redacted snapshot JSON")
+    summary.add_argument("--input", help="read an existing snapshot JSON")
     summary.add_argument("--limit", type=int, default=5, help="bounded live sample size when using --execute")
+    summary.add_argument("--privacy", choices=PRIVACY_CHOICES, default="private", help="live JSON privacy mode when using --execute")
     summary.add_argument("--output", help="write summary JSON to this path")
     summary.set_defaults(func=cmd_summary)
 
-    cluster = subparsers.add_parser("cluster", help="cluster redacted alarm artifacts and suggest read-only ignore strategy")
-    cluster.add_argument("--alarms", required=True, help="redacted alarms JSON from firewalla-skill alarms --json")
-    cluster.add_argument("--devices", help="optional redacted devices JSON; reserved for future stable anonymous joins")
+    cluster = subparsers.add_parser("cluster", help="cluster alarm artifacts and suggest read-only ignore strategy")
+    cluster.add_argument("--alarms", required=True, help="alarms JSON from firewalla-skill alarms --json")
+    cluster.add_argument("--devices", help="optional devices JSON; reserved for future joins")
     cluster.add_argument("--output", help="write cluster JSON to this path")
     cluster.set_defaults(func=cmd_cluster)
 
-    device_summary = subparsers.add_parser("device-summary", help="summarize redacted device inventory into current vs historical buckets")
-    device_summary.add_argument("--devices", required=True, help="redacted devices JSON from firewalla-skill devices --json")
+    device_summary = subparsers.add_parser("device-summary", help="summarize device inventory into current vs historical buckets")
+    device_summary.add_argument("--devices", required=True, help="devices JSON from firewalla-skill devices --json")
     device_summary.add_argument("--output", help="write device summary JSON to this path")
     device_summary.set_defaults(func=cmd_device_summary)
 
-    attribute = subparsers.add_parser("attribute", help="attribute redacted alarms to anonymized devices using stable token overlap")
-    attribute.add_argument("--alarms", required=True, help="redacted alarms JSON from firewalla-skill alarms --json")
-    attribute.add_argument("--devices", required=True, help="redacted devices JSON from firewalla-skill devices --json")
+    attribute = subparsers.add_parser("attribute", help="attribute alarms to source devices using Firewalla source fields")
+    attribute.add_argument("--alarms", required=True, help="alarms JSON from firewalla-skill alarms --json")
+    attribute.add_argument("--devices", required=True, help="devices JSON from firewalla-skill devices --json")
     attribute.add_argument("--output", help="write attribution JSON to this path")
     attribute.set_defaults(func=cmd_attribute)
 

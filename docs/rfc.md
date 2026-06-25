@@ -4,7 +4,7 @@
 
 Use a local-first integration path for the MVP. Treat the official Firewalla MSP API as a paid optional integration.
 
-The implementation target is an AI-facing CLI and root skill. The CLI collects read-only local data through SSH/Redis, redacts it by default, and emits JSON artifacts. The skill tells future agents when to use the CLI, how to install it, what privacy boundaries apply, and how to verify outputs.
+The implementation target is an AI-facing CLI and root skill. The CLI collects read-only local data through SSH/Redis and emits JSON artifacts. Local artifacts are private by default; redaction is an explicit export/sharing mode. The skill tells future agents when to use the CLI, how to install it, what privacy boundaries apply, and how to verify outputs.
 
 ## Rationale
 
@@ -98,14 +98,14 @@ The first CLI is `firewalla-skill`. It defaults to dry-run and prints a redacted
 Initial commands:
 
 1. `firewalla-skill health`: run `hostname`, `uptime`, and a safe Redis `PING` probe
-2. `firewalla-skill devices`: scan `host:mac:*`; `--all --json` emits parsed redacted inventory
-3. `firewalla-skill alarms`: list active alarm IDs; `--since-days N --include-archive --all --json` emits parsed redacted alarm records
+2. `firewalla-skill devices`: scan `host:mac:*`; `--all --json` emits parsed inventory, private by default with `--privacy redacted` for sharing
+3. `firewalla-skill alarms`: list active alarm IDs; `--since-days N --include-archive --all --json` emits parsed alarm records, private by default with `--privacy redacted` for sharing
 4. `firewalla-skill flows --system`: list recent system flow entries
 5. `firewalla-skill flows --mac <mac>`: list recent flow entries for one device MAC
 6. `firewalla-skill dump-format`: collect bounded examples for P0 surfaces into a git-ignored local artifact
-7. `firewalla-skill snapshot`: emit a redacted AI-readable JSON snapshot for box, devices, alarms, flows, and collection metadata
+7. `firewalla-skill snapshot`: emit an AI-readable JSON snapshot for box, devices, alarms, flows, and collection metadata
 8. `firewalla-skill summary`: emit a compact JSON situation summary from an existing snapshot or live bounded read
-9. `firewalla-skill resolve-device`: resolve an anonymous token back to matching device records; default output is redacted, with an explicit `--include-private` reveal mode
+9. `firewalla-skill resolve-device`: resolve an anonymous token back to matching device records for redacted-artifact diagnostics
 
 The command builder enforces a Redis read-only allowlist. Mutation commands such as `SET` are rejected before execution.
 
@@ -115,9 +115,9 @@ The CLI writes three kinds of artifacts:
 
 1. public-safe examples in `tests/fixtures/`, always fake
 2. local raw or semi-raw captures in `.firewalla_dumps/`, always git-ignored
-3. redacted snapshot JSON on stdout or a user-selected path
+3. local report JSON on stdout or a user-selected path, private by default and redacted only when `--privacy redacted` is requested
 
-Raw live output must never be committed. The public repo may include sanitized format reports, but only after replacing device names, MACs, IPs, domains, destination hosts, alarm payloads, and flow payloads with fake values.
+Raw or private live output must never be committed. The public repo may include sanitized format reports, but only after replacing device names, MACs, IPs, domains, destination hosts, alarm payloads, and flow payloads with fake values. The safety boundary is git ignore plus privacy scan, not forced local redaction.
 
 ## Snapshot Schema
 
@@ -127,7 +127,7 @@ The first stable schema is intentionally compact:
 {
   "box": {
     "hostname": "Firewalla",
-    "uptime": "redacted uptime string",
+    "uptime": "private uptime string",
     "redis": "PONG"
   },
   "devices": [],
@@ -136,7 +136,8 @@ The first stable schema is intentionally compact:
   "flows_summary": {},
   "collection": {
     "source": "ssh_redis",
-    "redacted": true,
+    "privacy": "private",
+    "redacted": false,
     "generated_at": "2026-01-01T00:00:00Z"
   }
 }
@@ -164,7 +165,7 @@ The summary is deterministic and does not call an LLM. It is a compact analysis 
 
 ## Alarm Clustering And Ignore Strategy
 
-`cluster` groups redacted alarm artifacts into first-pass actionability categories:
+`cluster` groups alarm artifacts into first-pass actionability categories:
 
 1. `routine_noise`: game/video category alarms that often represent expected household behavior
 2. `review_bandwidth`: large upload or abnormal bandwidth alarms that need device/time context
@@ -177,7 +178,7 @@ Alert-noise handling should not default to creating network rules. Network rules
 
 ## Stable Redaction And Device Attribution
 
-Redaction preserves stable anonymous tokens rather than replacing every sensitive value with a single placeholder. For example, a MAC address becomes `<mac:...>` and a device name-like field becomes `<bname:...>` or `<pname:...>`. The token is a short SHA-256 digest of the original value plus its kind.
+Private local output preserves raw identifiers because the primary use case is AI analysis on the user's own machine. Redaction is available for export and sharing. In redacted mode, sensitive values become stable anonymous tokens rather than a single placeholder. For example, a MAC address becomes `<mac:...>` and a device name-like field becomes `<bname:...>` or `<pname:...>`. The token is a short SHA-256 digest of the original value plus its kind.
 
 This allows safe local joins:
 
@@ -190,7 +191,7 @@ firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices r
 
 The redactor preserves schema keys such as `p.device.ip` and `p.intf.subnet`; it redacts values only. Field names are required for correct Firewalla interpretation and are not private by themselves.
 
-`resolve-device` is a secondary diagnostic workflow. It maps a stable anonymous token back to matching device records when a human needs to locate a device in the Firewalla App or verify a suspicious attribution. The privacy boundary is at the output mode: default output is redacted JSON, while `--include-private` emits real local fields such as name, IP, MAC, and local domain for the user's own machine. Agents should write private output only to git-ignored paths such as `reports/private_*.json`.
+`resolve-device` is a secondary diagnostic workflow for redacted artifacts. It maps a stable anonymous token back to matching device records when a human needs to locate a device in the Firewalla App or verify a suspicious attribution. Normal private reports should already show readable names, IPs, MACs, vendor/type, and last-active fields.
 
 ## Full Inventory And Alarm Windows
 
@@ -203,7 +204,7 @@ firewalla-skill devices --execute --all --json --output reports/devices_all_late
 firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
 ```
 
-These outputs are redacted and report-oriented, but still local-only by default because they can reveal household network structure through counts and timing.
+These outputs are private and report-oriented by default. They belong in ignored `reports/`. Use `--privacy redacted` only for artifacts that will be shared outside the local machine or copied into public docs/issues/PRs.
 
 Alarm time windows are filtered by `_alarm:<aid>` payload `timestamp` / `alarmTimestamp`. Redis sorted-set scores are used only for candidate ordering because `alarm_active` and `alarm_archive` do not consistently use event timestamp as score. `--candidate-limit` bounds how many IDs are inspected before payload filtering; the default is `2000`.
 
