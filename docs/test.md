@@ -100,6 +100,7 @@ FIREWALLA_LIVE_TESTS=1 python -m pytest -q -m live
 - `active-devices` filters devices by `lastActiveTimestamp` and `--since-days`.
 - Devices outside the window and devices missing activity timestamps are counted in `excluded_counts`.
 - When an alarm artifact is provided, source-attributed alarm categories and types are attached to each matching active device.
+- Duplicate device display names remain distinct through record-level `device_key` output and record-index attribution.
 - Investigation indicators are emitted for identity conflicts, missing metadata, bandwidth alarms, network-security alarms, and unknown alarm types.
 
 ### Resolve Device

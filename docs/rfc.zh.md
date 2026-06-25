@@ -119,13 +119,14 @@ CLI 默认 dry-run。未提供 `--execute` 时：
 
 ### 活跃设备调查 Schema
 
-`active-devices` 是本地工件关联命令。它读取设备清单，并可选读取告警工件，不连接 Firewalla。命令使用 `--since-days` 基于 `lastActiveTimestamp` 筛选设备，通过与 `attribute` 相同的源感知归因语义附加告警上下文，并输出 `investigation_indicators` 作为调查提示。
+`active-devices` 是本地工件关联命令。它读取设备清单，并可选读取告警工件，不连接 Firewalla。命令使用 `--since-days` 基于 `lastActiveTimestamp` 筛选设备，通过与 `attribute` 相同的源感知归因语义附加告警上下文，并输出 `investigation_indicators` 作为调查提示。告警上下文关联到具体设备记录，而不是显示名称，因此多块手表这类重名设备会保持区分。
 
 ```json
 {
   "active_devices": [
     {
       "device_id": "Example Device",
+      "device_key": "host:mac:aa:bb:cc:dd:ee:ff",
       "last_active_timestamp": 2000000000,
       "last_active_age_days": 0.01,
       "device_summary": {},

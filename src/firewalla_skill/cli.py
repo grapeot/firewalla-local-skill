@@ -624,7 +624,7 @@ def device_last_active(device: dict[str, object]) -> float | None:
     return numeric_timestamp(fields.get("lastActiveTimestamp"))
 
 
-def alarm_context_by_device(alarms_payload: dict[str, object], devices_payload: dict[str, object]) -> dict[str, dict[str, object]]:
+def alarm_context_by_device_index(alarms_payload: dict[str, object], devices_payload: dict[str, object]) -> dict[int, dict[str, object]]:
     alarms = alarms_payload.get("alarms") if isinstance(alarms_payload.get("alarms"), list) else []
     devices = devices_payload.get("devices") if isinstance(devices_payload.get("devices"), list) else []
 
@@ -634,12 +634,13 @@ def alarm_context_by_device(alarms_payload: dict[str, object], devices_payload: 
             continue
         device_index.append(
             {
+                "index": index,
                 "id": device_display_id(device, f"<device-index:{index}>"),
                 "tokens": device_identity_tokens(device),
             }
         )
 
-    context: dict[str, dict[str, object]] = {}
+    context: dict[int, dict[str, object]] = {}
     for alarm in alarms:
         if not isinstance(alarm, dict):
             continue
@@ -651,8 +652,8 @@ def alarm_context_by_device(alarms_payload: dict[str, object], devices_payload: 
         matches = [entry for entry in device_index if alarm_tokens & entry["tokens"]]
         if not matches:
             continue
-        device_id = str(matches[0]["id"])
-        item = context.setdefault(device_id, {"alarm_count": 0, "categories": {}, "types": {}, "latest_alarm_timestamp": None})
+        matched_index = int(matches[0]["index"])
+        item = context.setdefault(matched_index, {"alarm_count": 0, "categories": {}, "types": {}, "latest_alarm_timestamp": None})
         item["alarm_count"] = int(item["alarm_count"]) + 1
         item["categories"][category] = item["categories"].get(category, 0) + 1
         item["types"][alarm_type] = item["types"].get(alarm_type, 0) + 1
@@ -694,7 +695,7 @@ def build_active_devices_payload(
     devices = devices_payload.get("devices") if isinstance(devices_payload.get("devices"), list) else []
     now_ts = (now or datetime.now(UTC)).timestamp()
     cutoff = now_ts - since_days * 24 * 60 * 60
-    alarm_context = alarm_context_by_device(alarms_payload, devices_payload) if alarms_payload else {}
+    alarm_context = alarm_context_by_device_index(alarms_payload, devices_payload) if alarms_payload else {}
 
     active: list[dict[str, object]] = []
     excluded_counts: list[str] = []
@@ -711,9 +712,10 @@ def build_active_devices_payload(
 
         device_id = device_display_id(device, f"<device-index:{index}>")
         summary = device_summary_fields(device)
-        context = alarm_context.get(str(device_id), {"alarm_count": 0, "categories": {}, "types": {}, "latest_alarm_timestamp": None})
+        context = alarm_context.get(index, {"alarm_count": 0, "categories": {}, "types": {}, "latest_alarm_timestamp": None})
         active.append(
             {
+                "device_key": device.get("redis_key") or f"<device-index:{index}>",
                 "device_id": device_id,
                 "last_active_timestamp": last_active,
                 "last_active_age_days": round((now_ts - last_active) / (24 * 60 * 60), 3),

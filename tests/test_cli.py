@@ -321,3 +321,23 @@ def test_build_active_devices_payload_joins_alarm_context_and_indicators():
     assert active["alarm_context"]["categories"] == {"review_network_security": 1, "routine_noise": 1}
     assert "identity_conflict" in active["investigation_indicators"]
     assert "network_security_alarm" in active["investigation_indicators"]
+
+
+def test_build_active_devices_payload_keeps_duplicate_display_names_distinct():
+    devices = {
+        "devices": [
+            {"redis_key": "host:mac:aa:bb:cc:dd:ee:01", "fields": {"name": "Watch", "mac": "aa:bb:cc:dd:ee:01", "lastActiveTimestamp": 200000}},
+            {"redis_key": "host:mac:aa:bb:cc:dd:ee:02", "fields": {"name": "Watch", "mac": "aa:bb:cc:dd:ee:02", "lastActiveTimestamp": 200000}},
+        ],
+        "collection": {"privacy": "private"},
+    }
+    alarms = {
+        "alarms": [{"alarm": {"type": "ALARM_LARGE_UPLOAD", "p.device.mac": "aa:bb:cc:dd:ee:02"}}],
+        "collection": {"privacy": "private"},
+    }
+
+    payload = build_active_devices_payload(devices, alarms, since_days=7, now=datetime.fromtimestamp(200000, UTC))
+    by_key = {device["device_key"]: device for device in payload["active_devices"]}
+
+    assert by_key["host:mac:aa:bb:cc:dd:ee:01"]["alarm_context"]["alarm_count"] == 0
+    assert by_key["host:mac:aa:bb:cc:dd:ee:02"]["alarm_context"]["alarm_count"] == 1

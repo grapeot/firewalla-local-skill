@@ -119,13 +119,14 @@ Analysis commands such as `cluster`, `device-summary`, `attribute`, and `active-
 
 ### Active-Device Investigation Schema
 
-`active-devices` is a local artifact join. It reads a device inventory and, optionally, an alarm artifact. It does not connect to Firewalla. The command filters devices by `lastActiveTimestamp` using `--since-days`, attaches alarm context through the same source-only attribution semantics used by `attribute`, and emits `investigation_indicators` for triage.
+`active-devices` is a local artifact join. It reads a device inventory and, optionally, an alarm artifact. It does not connect to Firewalla. The command filters devices by `lastActiveTimestamp` using `--since-days`, attaches alarm context through the same source-only attribution semantics used by `attribute`, and emits `investigation_indicators` for triage. Alarm context is joined to the matching device record, not the display name, so duplicate names such as multiple watches remain distinct.
 
 ```json
 {
   "active_devices": [
     {
       "device_id": "Example Device",
+      "device_key": "host:mac:aa:bb:cc:dd:ee:ff",
       "last_active_timestamp": 2000000000,
       "last_active_age_days": 0.01,
       "device_summary": {},
