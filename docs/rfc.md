@@ -98,8 +98,8 @@ The first CLI is `firewalla-skill`. It defaults to dry-run and prints a redacted
 Initial commands:
 
 1. `firewalla-skill health`: run `hostname`, `uptime`, and a safe Redis `PING` probe
-2. `firewalla-skill devices`: scan `host:mac:*`
-3. `firewalla-skill alarms`: list active alarm IDs from `alarm_active`
+2. `firewalla-skill devices`: scan `host:mac:*`; `--all --json` emits parsed redacted inventory
+3. `firewalla-skill alarms`: list active alarm IDs; `--since-days N --include-archive --all --json` emits parsed redacted alarm records
 4. `firewalla-skill flows --system`: list recent system flow entries
 5. `firewalla-skill flows --mac <mac>`: list recent flow entries for one device MAC
 6. `firewalla-skill dump-format`: collect bounded examples for P0 surfaces into a git-ignored local artifact
@@ -160,6 +160,19 @@ The first stable schema is intentionally compact:
 ```
 
 The summary is deterministic and does not call an LLM. It is a compact analysis substrate, not the final natural-language report.
+
+## Full Inventory And Alarm Windows
+
+The CLI must cover the common analysis question directly: all known devices and all alarms in a recent window. Agents should not need one-off scripts for this path.
+
+Canonical local report inputs:
+
+```bash
+firewalla-skill devices --execute --all --json --output reports/devices_all_latest.json
+firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
+```
+
+These outputs are redacted and report-oriented, but still local-only by default because they can reveal household network structure through counts and timing.
 
 ## Test Tiers
 

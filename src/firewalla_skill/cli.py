@@ -8,7 +8,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Sequence
 
@@ -255,8 +255,11 @@ def collect_health(target: SshTarget, *, execute: bool) -> tuple[dict[str, objec
     return redacted_json_value(box), raw
 
 
-def collect_devices(target: SshTarget, *, execute: bool, limit: int) -> tuple[list[object], list[dict[str, object]]]:
-    remote = "keys=$(redis-cli --raw --scan --pattern 'host:mac:*' | head -n " + shlex.quote(str(limit)) + "); for key in $keys; do echo __FIREWALLA_KEY__$key; redis-cli --raw HGETALL \"$key\"; done"
+def collect_devices(target: SshTarget, *, execute: bool, limit: int | None) -> tuple[list[object], list[dict[str, object]]]:
+    key_command = "redis-cli --raw --scan --pattern 'host:mac:*'"
+    if limit is not None:
+        key_command += " | head -n " + shlex.quote(str(limit))
+    remote = "keys=$(" + key_command + "); for key in $keys; do echo __FIREWALLA_KEY__$key; redis-cli --raw HGETALL \"$key\"; done"
     code, stdout, stderr, command = capture_remote(target, remote, execute=execute)
     raw = [{"name": "devices", "command": command, "returncode": code, "stdout": stdout, "stderr": stderr}]
     if not execute or code != 0:
@@ -278,8 +281,37 @@ def collect_devices(target: SshTarget, *, execute: bool, limit: int) -> tuple[li
     return redacted_json_value(devices), raw
 
 
-def collect_alarms(target: SshTarget, *, execute: bool, limit: int) -> tuple[list[object], list[dict[str, object]]]:
-    remote = "ids=$(redis-cli --raw ZREVRANGE alarm_active 0 " + shlex.quote(str(limit - 1)) + "); for aid in $ids; do echo __FIREWALLA_ALARM__$aid; redis-cli --raw HGETALL \"_alarm:$aid\"; echo __FIREWALLA_DETAIL__$aid; redis-cli --raw HGETALL \"_alarmDetail:$aid\"; done"
+def collect_alarms(
+    target: SshTarget,
+    *,
+    execute: bool,
+    limit: int | None,
+    since_days: int | None = None,
+    include_archive: bool = False,
+) -> tuple[list[object], list[dict[str, object]]]:
+    sources = ["alarm_active"]
+    if include_archive:
+        sources.append("alarm_archive")
+    if since_days is not None:
+        cutoff = datetime.now(UTC) - timedelta(days=since_days)
+        score_selector = "ZREVRANGEBYSCORE \"$source\" +inf " + shlex.quote(str(cutoff.timestamp()))
+    else:
+        end = -1 if limit is None else limit - 1
+        score_selector = "ZREVRANGE \"$source\" 0 " + shlex.quote(str(end))
+
+    limit_filter = ""
+    if limit is not None and since_days is not None:
+        limit_filter = " | head -n " + shlex.quote(str(limit))
+
+    source_list = " ".join(shlex.quote(source) for source in sources)
+    remote = (
+        "for source in "
+        + source_list
+        + "; do ids=$(redis-cli --raw "
+        + score_selector
+        + limit_filter
+        + "); for aid in $ids; do echo __FIREWALLA_ALARM__$source:$aid; redis-cli --raw HGETALL \"_alarm:$aid\"; echo __FIREWALLA_DETAIL__$aid; redis-cli --raw HGETALL \"_alarmDetail:$aid\"; done; done"
+    )
     code, stdout, stderr, command = capture_remote(target, remote, execute=execute)
     raw = [{"name": "alarms", "command": command, "returncode": code, "stdout": stdout, "stderr": stderr}]
     if not execute or code != 0:
@@ -289,12 +321,17 @@ def collect_alarms(target: SshTarget, *, execute: bool, limit: int) -> tuple[lis
     current: dict[str, object] | None = None
     mode: str | None = None
     lines: list[str] = []
+    seen: set[str] = set()
     for line in split_lines(stdout):
         if line.startswith("__FIREWALLA_ALARM__"):
             if current is not None and mode:
                 current[mode] = pair_lines_to_dict(lines)
-                alarms.append(current)
-            current = {"id": line.removeprefix("__FIREWALLA_ALARM__")}
+                if str(current.get("id")) not in seen:
+                    seen.add(str(current.get("id")))
+                    alarms.append(current)
+            source_and_id = line.removeprefix("__FIREWALLA_ALARM__")
+            source, _, aid = source_and_id.partition(":")
+            current = {"id": aid, "source": source}
             mode = "alarm"
             lines = []
         elif line.startswith("__FIREWALLA_DETAIL__"):
@@ -306,7 +343,8 @@ def collect_alarms(target: SshTarget, *, execute: bool, limit: int) -> tuple[lis
             lines.append(line)
     if current is not None and mode:
         current[mode] = pair_lines_to_dict(lines)
-        alarms.append(current)
+        if str(current.get("id")) not in seen:
+            alarms.append(current)
     return redacted_json_value(alarms), raw
 
 
@@ -438,12 +476,50 @@ def cmd_health(args: argparse.Namespace) -> int:
 
 def cmd_devices(args: argparse.Namespace) -> int:
     target = env_target(args)
+    if args.json:
+        devices, _raw = collect_devices(target, execute=args.execute, limit=None if args.all else args.count)
+        if not args.execute:
+            print(json.dumps({"dry_run": True, "message": "devices --json requires --execute to collect data"}, indent=2))
+            return 0
+        payload = {"devices": devices, "collection": {"source": "ssh_redis", "redacted": True, "all": args.all, "limit": None if args.all else args.count}}
+        if args.output:
+            write_json(Path(args.output), payload)
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
     remote = build_redis_command(["SCAN", "0", "MATCH", "host:mac:*", "COUNT", str(args.count)])
     return run_remote(target, remote, execute=args.execute)
 
 
 def cmd_alarms(args: argparse.Namespace) -> int:
     target = env_target(args)
+    if args.json:
+        alarms, _raw = collect_alarms(
+            target,
+            execute=args.execute,
+            limit=None if args.all else args.limit,
+            since_days=args.since_days,
+            include_archive=args.include_archive,
+        )
+        if not args.execute:
+            print(json.dumps({"dry_run": True, "message": "alarms --json requires --execute to collect data"}, indent=2))
+            return 0
+        payload = {
+            "alarms": alarms,
+            "collection": {
+                "source": "ssh_redis",
+                "redacted": True,
+                "all": args.all,
+                "limit": None if args.all else args.limit,
+                "since_days": args.since_days,
+                "include_archive": args.include_archive,
+            },
+        }
+        if args.output:
+            write_json(Path(args.output), payload)
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
     remote = build_redis_command(["ZREVRANGE", "alarm_active", "0", str(args.limit - 1)])
     return run_remote(target, remote, execute=args.execute)
 
@@ -527,11 +603,19 @@ def build_parser() -> argparse.ArgumentParser:
     devices = subparsers.add_parser("devices", help="scan read-only Redis host keys")
     add_common_args(devices)
     devices.add_argument("--count", type=int, default=100, help="Redis SCAN count hint")
+    devices.add_argument("--all", action="store_true", help="collect all device records when used with --json")
+    devices.add_argument("--json", action="store_true", help="emit parsed redacted JSON instead of raw Redis output")
+    devices.add_argument("--output", help="write JSON output to this path")
     devices.set_defaults(func=cmd_devices)
 
     alarms = subparsers.add_parser("alarms", help="list active alarm ids from read-only Redis")
     add_common_args(alarms)
     alarms.add_argument("--limit", type=int, default=20, help="maximum alarm ids")
+    alarms.add_argument("--all", action="store_true", help="collect all matching alarm records when used with --json")
+    alarms.add_argument("--since-days", type=int, help="collect alarms newer than this many days when used with --json")
+    alarms.add_argument("--include-archive", action="store_true", help="include alarm_archive in addition to alarm_active")
+    alarms.add_argument("--json", action="store_true", help="emit parsed redacted JSON instead of raw Redis output")
+    alarms.add_argument("--output", help="write JSON output to this path")
     alarms.set_defaults(func=cmd_alarms)
 
     flows = subparsers.add_parser("flows", help="list recent flow records from read-only Redis")

@@ -25,6 +25,8 @@
 - Added `summary` command for deterministic JSON situation summaries from existing snapshots or live bounded reads.
 - Moved detailed privacy operating rules out of README and into `AGENTS.md` / `skills/firewalla.md`; README now keeps only a short publishable privacy pointer.
 - Added git-ignored `reports/` directory for local human-facing reports, with tracked `.gitkeep` for discoverability.
+- Added first-class CLI support for full device inventory and recent alarm windows: `devices --all --json` and `alarms --since-days N --include-archive --all --json`.
+- Updated local Chinese report using CLI-generated all-device and last-three-days alarm artifacts.
 
 ## Lessons Learned
 

@@ -44,3 +44,17 @@ def test_live_summary_read_only_redacted(tmp_path):
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert "headline" in payload
     assert set(payload["counts"]) == {"devices", "alarms", "flows"}
+
+
+@pytest.mark.skipif(not live_enabled(), reason="set FIREWALLA_LIVE_TESTS=1 for live Firewalla tests")
+def test_live_all_devices_and_recent_alarms_json(tmp_path):
+    devices = tmp_path / "devices.json"
+    alarms = tmp_path / "alarms.json"
+    assert main(["devices", "--execute", "--all", "--json", "--output", str(devices)]) == 0
+    assert main(["alarms", "--execute", "--since-days", "3", "--include-archive", "--all", "--json", "--output", str(alarms)]) == 0
+    devices_payload = json.loads(devices.read_text(encoding="utf-8"))
+    alarms_payload = json.loads(alarms.read_text(encoding="utf-8"))
+    assert isinstance(devices_payload["devices"], list)
+    assert isinstance(alarms_payload["alarms"], list)
+    assert devices_payload["collection"]["all"] is True
+    assert alarms_payload["collection"]["since_days"] == 3
