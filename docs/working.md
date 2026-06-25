@@ -31,6 +31,7 @@
 - Updated local Chinese report with alarm cluster results and guidance against using network rules as the default alert-noise solution.
 - Fixed alarm archive time-window filtering: `--since-days` now filters by `_alarm:<aid>` payload `timestamp` / `alarmTimestamp` instead of trusting Redis sorted-set scores. Added `--candidate-limit` to bound candidate IDs before payload filtering.
 - Added stable anonymous token redaction plus `device-summary` and `attribute` commands. Live attribution shows most recent alarm volume can be reduced to a small anonymous device set before human review.
+- Added `resolve-device` for the attribution follow-up loop. The command resolves a stable anonymous token to matching device records through read-only Redis. It defaults to redacted JSON for normal AI workflows; `--include-private` explicitly reveals real local fields for locating the device in the user's own Firewalla App.
 
 ## Lessons Learned
 
@@ -39,3 +40,4 @@
 - Firewalla public source confirms Redis key patterns for hosts (`host:mac:*`), flows (`flow:conn:*` / `flow:local:*`), and alarms (`alarm_active`, `_alarm:*`, `_alarmDetail:*`).
 - The local HA project confirms a richer local protocol over `http://{local_ip}:8833/v1/encipher/message/{gid}`, but it requires high-trust local credential handling.
 - The CLI defaults to dry-run and requires `--execute` before connecting to a real box.
+- Device resolution is a public workflow capability. Only the private-field reveal mode requires local-only handling.

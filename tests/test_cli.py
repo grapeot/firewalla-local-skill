@@ -10,12 +10,15 @@ from firewalla_skill.cli import (
     build_redis_raw_command,
     build_ssh_command,
     cluster_alarms_payload,
+    device_matches_token,
+    field_tokens,
     filter_alarms_since,
     main,
     load_local_config,
     pair_lines_to_dict,
     redact_sensitive_text,
     redacted_command,
+    resolve_device_payload,
     stable_token,
     summarize_devices_payload,
     summarize_snapshot,
@@ -187,6 +190,44 @@ def test_attribute_alarms_to_devices_uses_stable_tokens():
     assert attribution["attributed_alarm_count"] == 1
     assert attribution["unattributed_alarm_count"] == 1
     assert attribution["top_devices"][0]["categories"] == {"routine_noise": 1}
+
+
+def test_field_tokens_supports_private_lookup():
+    assert stable_token("bname", "Example Device") in field_tokens("bname", "Example Device")
+    assert stable_token("mac", "aa:bb:cc:dd:ee:ff") in field_tokens("mac", "aa:bb:cc:dd:ee:ff")
+
+
+def test_resolve_device_payload_redacts_by_default():
+    output = resolve_device_payload(
+        stable_token("bname", "Example Device"),
+        [
+            {
+                "redis_key": "host:mac:aa:bb:cc:dd:ee:ff",
+                "matched_fields": ["bname"],
+                "fields": {"bname": "Example Device", "ipv4Addr": "192.0.2.1"},
+            }
+        ],
+    )
+    fields = output["matches"][0]["fields"]
+    assert output["collection"]["redacted"] is True
+    assert fields["bname"] == stable_token("bname", "Example Device")
+    assert fields["ipv4Addr"] == stable_token("ip", "192.0.2.1")
+    assert "aa:bb:cc:dd:ee:ff" not in output["matches"][0]["redis_key"]
+
+
+def test_resolve_device_payload_can_include_private_fields():
+    output = resolve_device_payload(
+        stable_token("bname", "Example Device"),
+        [{"redis_key": "host:mac:aa:bb:cc:dd:ee:ff", "matched_fields": ["bname"], "fields": {"bname": "Example Device"}}],
+        include_private=True,
+    )
+    assert output["collection"]["private_fields_included"] is True
+    assert output["matches"][0]["fields"]["bname"] == "Example Device"
+
+
+def test_device_matches_token_returns_matching_fields():
+    token = stable_token("bname", "Example Device")
+    assert device_matches_token({"bname": "Example Device", "name": "Other"}, token) == ["bname"]
 
 
 def test_filter_alarms_since_uses_payload_timestamp_not_source_score():
