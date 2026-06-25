@@ -114,6 +114,8 @@ This is intentionally smaller than Firewalla's raw data. The product should pres
 
 The MVP should treat device cleanup and alarm attribution as first-class read-only analysis. Local attribution should show readable device summaries, including names, IPs, MACs, vendor/type, and last-active fields when available. Redacted artifacts must preserve stable anonymous tokens, such as `<mac:...>` or `<bname:...>`, so public-safe reports can still join devices and alarms without exposing raw identifiers.
 
+Device display names must prefer current operational names over stale discovery aliases. Use `name`, `dhcpName`, `localDomain`, `sambaName`, and `ssdpName` before `bname`, `bonjourName`, or `pname`. Keep older aliases in the summary and flag identity conflicts when the current name candidates disagree with Bonjour/BName aliases.
+
 Required outputs:
 
 1. current-vs-historical device buckets by last active timestamp

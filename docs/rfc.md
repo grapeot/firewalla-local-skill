@@ -189,6 +189,8 @@ firewalla-skill attribute --alarms reports/alarms_last3d_latest.json --devices r
 
 `attribute` uses token overlap only from source-like alarm fields, not from the entire alarm payload. Valid source fields include `device`, `p.device.id`, `p.device.ip`, `p.device.mac`, `p.device.name`, and `p.flows[].device`. Infrastructure/interface fields such as `p.intf.*` are excluded because they often contain the Firewalla gateway IP or interface identity. Treating those fields as source fields incorrectly attributes household alarms to Firewalla itself.
 
+Attribution output includes `device_summary` for each top device. Display IDs prefer current operational names (`name`, `dhcpName`, `localDomain`, `sambaName`, `ssdpName`) over discovery aliases (`bname`, `bonjourName`, `pname`). Discovery aliases are still emitted as `aliases`; if they conflict with current names, `identity_conflict` records both sides so reports can avoid presenting a stale Bonjour name as the current device identity.
+
 The redactor preserves schema keys such as `p.device.ip` and `p.intf.subnet`; it redacts values only. Field names are required for correct Firewalla interpretation and are not private by themselves.
 
 `resolve-device` is a secondary diagnostic workflow for redacted artifacts. It maps a stable anonymous token back to matching device records when a human needs to locate a device in the Firewalla App or verify a suspicious attribution. Normal private reports should already show readable names, IPs, MACs, vendor/type, and last-active fields.

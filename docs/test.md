@@ -24,6 +24,7 @@ Use fake fixtures and dry-runs for:
 11. source-aware alarm attribution that uses `p.device.*` / `p.flows[].device` and excludes `p.intf.*` infrastructure fields
 12. private-by-default JSON output with explicit `--privacy redacted` export mode
 13. readable `device_summary` in attribution output for private inputs
+14. device display precedence that prefers current names over stale Bonjour/BName aliases and flags identity conflicts
 
 ## Live Tests
 

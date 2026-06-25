@@ -11,6 +11,8 @@ from firewalla_skill.cli import (
     build_ssh_command,
     cluster_alarms_payload,
     device_matches_token,
+    device_display_id,
+    device_summary_fields,
     extract_alarm_source_tokens,
     field_tokens,
     filter_alarms_since,
@@ -211,6 +213,24 @@ def test_alarm_source_tokens_exclude_firewalla_interface_fields():
     tokens = extract_alarm_source_tokens(alarm)
     assert device_token in tokens
     assert gateway_token not in tokens
+
+
+def test_device_display_prefers_current_name_over_stale_alias():
+    device = {
+        "fields": {
+            "bname": "Old Laptop Alias",
+            "bonjourName": "Old Laptop Alias",
+            "name": "CurrentBox",
+            "dhcpName": "currentbox",
+            "localDomain": "currentbox",
+            "mac": "aa:bb:cc:dd:ee:ff",
+        }
+    }
+    assert device_display_id(device, "fallback") == "CurrentBox"
+    summary = device_summary_fields(device)
+    assert summary["name"] == "CurrentBox"
+    assert "Old Laptop Alias" in summary["aliases"]
+    assert summary["identity_conflict"]["current_name_candidates"] == ["currentbox"]
 
 
 def test_field_tokens_supports_private_lookup():

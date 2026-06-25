@@ -522,7 +522,7 @@ def device_identity_tokens(device: dict[str, object]) -> set[str]:
 
 def device_display_id(device: dict[str, object], fallback: str) -> str:
     fields = device.get("fields") if isinstance(device.get("fields"), dict) else {}
-    for key in ("bname", "name", "pname", "bonjourName", "dhcpName", "ipv4", "ipv4Addr", "mac"):
+    for key in ("name", "dhcpName", "localDomain", "sambaName", "ssdpName", "bname", "bonjourName", "pname", "ipv4", "ipv4Addr", "mac"):
         value = fields.get(key)
         if isinstance(value, str) and value.strip():
             return value
@@ -534,12 +534,26 @@ def device_summary_fields(device: dict[str, object]) -> dict[str, object]:
     fields = device.get("fields") if isinstance(device.get("fields"), dict) else {}
     detect = fields.get("detect") if isinstance(fields.get("detect"), dict) else {}
     summary: dict[str, object] = {}
-    for key in ("bname", "name", "pname", "bonjourName", "dhcpName", "ipv4", "ipv4Addr", "mac", "macVendor", "localDomain", "lastActiveTimestamp"):
+    for key in ("name", "dhcpName", "localDomain", "sambaName", "ssdpName", "bname", "bonjourName", "pname", "ipv4", "ipv4Addr", "mac", "macVendor", "lastActiveTimestamp"):
         if key in fields:
             summary[key] = fields[key]
     for key in ("brand", "model", "os", "type"):
         if key in detect:
             summary[f"detect.{key}"] = detect[key]
+    aliases: list[str] = []
+    for key in ("bname", "bonjourName", "pname"):
+        value = fields.get(key)
+        if isinstance(value, str) and value.strip() and value != summary.get("name") and value != summary.get("dhcpName") and value != summary.get("localDomain"):
+            aliases.append(value)
+    if aliases:
+        summary["aliases"] = sorted(set(aliases))
+    current_names = [str(fields.get(key)).strip().lower() for key in ("name", "dhcpName", "localDomain", "sambaName") if isinstance(fields.get(key), str) and str(fields.get(key)).strip()]
+    stale_aliases = [alias for alias in aliases if alias.strip().lower() not in current_names]
+    if stale_aliases and current_names:
+        summary["identity_conflict"] = {
+            "current_name_candidates": sorted(set(current_names)),
+            "alias_candidates": sorted(set(stale_aliases)),
+        }
     return summary
 
 
