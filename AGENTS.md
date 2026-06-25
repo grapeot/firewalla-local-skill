@@ -13,8 +13,11 @@ This is a public-ready AI skill project for interacting with Firewalla through l
 
 ## Privacy Rules
 
-- Do not commit real MSP domains, access tokens, box IDs, device names, IP addresses, flow data, alarms, or screenshots.
-- Use `.env` for real credentials and keep `.env` out of git.
+- This repository is designed to be publishable with only fake examples.
+- Do not commit real Firewalla MSP domains, access tokens, box IDs, device names, IP addresses, MAC addresses, domains, flow data, alarms, raw snapshots, local SSH aliases, or screenshots.
+- Use `.env`, `.firewalla.local.json`, `~/.ssh/config`, or a password manager for real credentials and local routing. Keep those files out of git.
+- Live captures belong in `.firewalla_dumps/`, which is git-ignored. Public docs and tests use fake or redacted examples only.
+- Human-facing local reports belong in `reports/`. The directory has a tracked `.gitkeep`, but report files are ignored by default.
 - Keep `.env.example` fake and publishable.
 - If a workspace needs private routing or aliases, put them in the workspace-level private skill overlay, not in this repo.
 

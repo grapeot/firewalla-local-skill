@@ -63,7 +63,7 @@ FIREWALLA_BOX_ID=00000000-0000-0000-0000-000000000000
 ## Current MVP Workflow
 
 1. Confirm local SSH access to Firewalla.
-2. Start with dry-run CLI commands: `firewalla-skill health`, `devices`, `alarms`, `flows`, `snapshot`, and `dump-format`.
+2. Start with dry-run CLI commands: `firewalla-skill health`, `devices`, `alarms`, `flows`, `snapshot`, `summary`, and `dump-format`.
 3. Only use MSP API if the user has a paid plan token.
 4. Keep all mutation operations out of scope until read-only access is working.
 
@@ -77,6 +77,12 @@ For AI analysis, prefer:
 firewalla-skill snapshot --execute --limit 5 --output .firewalla_dumps/snapshot.json
 ```
 
+Then summarize:
+
+```bash
+firewalla-skill summary --input .firewalla_dumps/snapshot.json
+```
+
 For format discovery, prefer:
 
 ```bash
@@ -84,6 +90,8 @@ firewalla-skill dump-format --execute --limit 5
 ```
 
 The public repo may document field shapes and fake examples. It must not include raw live artifacts.
+
+Human-readable local reports should be written under `reports/`. That directory is present for discoverability, while report files are git-ignored by default.
 
 ## Verification
 

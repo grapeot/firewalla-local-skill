@@ -8,9 +8,7 @@ Early but runnable CLI. The implementation target is local-first read-only acces
 
 ## Privacy
 
-This repository is designed to be publishable with only fake examples. Do not commit real Firewalla MSP domains, tokens, box IDs, device names, alarms, flows, or local network details.
-
-Live captures belong in `.firewalla_dumps/`, which is git-ignored. Public docs and tests use fake or redacted examples only.
+This repository is designed to be publishable. Operational privacy rules live in `AGENTS.md` and `skills/firewalla.md`.
 
 ## Install This Skill Into An AI Workspace
 
@@ -104,6 +102,7 @@ Current commands:
 4. `flows`: Redis `ZREVRANGE` for `flow:conn:system` or a MAC-specific flow key
 5. `snapshot`: bounded redacted JSON snapshot for AI reasoning
 6. `dump-format`: bounded local raw/redacted dump for format discovery
+7. `summary`: compact JSON situation summary from a snapshot or live bounded read
 
 Local format dump:
 
@@ -112,6 +111,20 @@ firewalla-skill dump-format --execute --limit 5
 ```
 
 This writes to `.firewalla_dumps/`, which is ignored by git.
+
+Local human-facing reports can go in `reports/`. The directory is present in git, but report files are ignored by default.
+
+Summary from a snapshot:
+
+```bash
+firewalla-skill summary --input .firewalla_dumps/snapshot.json
+```
+
+Live bounded summary:
+
+```bash
+firewalla-skill summary --execute --limit 5
+```
 
 ## Test Tiers
 

@@ -22,6 +22,9 @@
 - Final verification before publishing: offline tests `14 passed, 3 deselected`; live tests `3 passed, 14 deselected`; privacy scan returned no matches.
 - Published public GitHub repo: `https://github.com/grapeot/firewalla-local-skill`.
 - Configured GitHub Actions CI and main branch protection with required `test` status check, no required reviewers, no force pushes, and no branch deletion.
+- Added `summary` command for deterministic JSON situation summaries from existing snapshots or live bounded reads.
+- Moved detailed privacy operating rules out of README and into `AGENTS.md` / `skills/firewalla.md`; README now keeps only a short publishable privacy pointer.
+- Added git-ignored `reports/` directory for local human-facing reports, with tracked `.gitkeep` for discoverability.
 
 ## Lessons Learned
 
