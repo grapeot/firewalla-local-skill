@@ -37,6 +37,14 @@
 - Updated device display identity precedence after a stale Bonjour/BName alias made a current `Nullptr` device appear as an old Mac mini. Attribution now prefers current operational names and emits alias/conflict metadata.
 - Added `active-devices` for last-N-days device investigation. It reads local device and alarm artifacts, filters by `lastActiveTimestamp`, joins source-attributed alarm context, and emits investigation indicators for identity conflicts, missing metadata, bandwidth alarms, network-security alarms, and unknown alarm types.
 
+### 2026-06-27
+
+- Removed the CLI redaction/privacy mode entirely. Local Firewalla analysis now preserves real device names, IPs, MACs, domains, alarms, and flow fields by design.
+- Removed `--privacy redacted`, automatic stdout/stderr redaction, redacted dump output, stable token helpers, and `resolve-device`.
+- Updated attribution internals to match alarms and devices using real source identity values instead of anonymous tokens.
+- Updated README, root skill, PRD/RFC, format report, tests, and project rules to make git-ignored local artifacts the privacy boundary. Public examples should be fake/minimal fixtures, not transformed live data.
+- Verified offline tests: `python -m pytest -q -m "not live"` -> `28 passed, 6 deselected`.
+
 ## Lessons Learned
 
 - Official API exists but appears paid-gated from Professional upward.
@@ -47,3 +55,4 @@
 - Device resolution is a public workflow capability. Only the private-field reveal mode requires local-only handling.
 - Firewalla alarm field names are part of the schema, not private data. Redact values, not keys, otherwise parser and report semantics are lost.
 - Public-ready means the repository stays publishable; it does not mean local artifacts should be redacted by default. Git ignore and privacy scan are the publishing boundary.
+- Redaction is actively harmful for this CLI's primary use case because it breaks practical flow/device/domain joins. Preserve raw local values and keep artifacts out of git.

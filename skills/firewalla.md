@@ -14,8 +14,8 @@ Use this skill when the user asks about Firewalla network state, device inventor
 - The CLI command is `firewalla-skill`.
 - Live collection is dry-run by default; add `--execute` only when you intend to query the user's Firewalla.
 - The integration is read-only. Do not write Redis, change iptables, alter Firewalla policies, or edit service files.
-- Local JSON output is private by default and may contain real names, IPs, MACs, domains, and alarm messages.
-- Use `--privacy redacted` for artifacts that may be shared in public docs, issues, PRs, screenshots, or messages.
+- Local JSON output preserves real names, IPs, MACs, domains, alarms, and flow fields.
+- Keep live artifacts in ignored local paths. Do not paste them into public docs, issues, PRs, screenshots, or messages.
 
 ## Local Configuration
 
@@ -42,13 +42,6 @@ firewalla-skill devices --execute --all --json --output reports/devices_all_late
 firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --output reports/alarms_last3d_latest.json
 ```
 
-Create public-safe versions only when needed:
-
-```bash
-firewalla-skill devices --execute --all --json --privacy redacted --output reports/devices_all_redacted.json
-firewalla-skill alarms --execute --since-days 3 --include-archive --all --json --privacy redacted --output reports/alarms_last3d_redacted.json
-```
-
 Analyze collected artifacts locally:
 
 ```bash
@@ -71,7 +64,7 @@ Use `dump-format` only for local schema inspection:
 firewalla-skill dump-format --execute --limit 5
 ```
 
-It writes raw and redacted bounded dumps to `.firewalla_dumps/`, which is git-ignored.
+It writes local raw bounded dumps to `.firewalla_dumps/`, which is git-ignored.
 
 ## Attribution Rules
 
@@ -95,17 +88,6 @@ When reading `attribute` output, use `device_summary` first. Device display name
 - Large upload and abnormal bandwidth alarms need device and time context.
 - UPNP, BRO_NOTICE, DUAL_WAN, and INTEL alerts should be reviewed before ignoring.
 - Future write operations require a separate RFC and explicit opt-in. Prefer official Firewalla app alarm/notification tuning or local Encipher API over direct Redis writes.
-
-## Redacted Token Lookup
-
-Use `resolve-device` only for redacted artifacts or diagnostics:
-
-```bash
-firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --output reports/device_resolve_latest.json
-firewalla-skill resolve-device --execute --token '<bname:aaaaaaaaaa>' --include-private --output reports/private_device_resolve_latest.json
-```
-
-Private attribution reports should already include readable device summaries, so token lookup is usually unnecessary for normal local analysis.
 
 ## Tests
 

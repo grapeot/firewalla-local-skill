@@ -15,7 +15,7 @@ def test_snapshot_dry_run_has_stable_top_level_schema(capsys, tmp_path):
     payload = json.loads(capsys.readouterr().out)
     assert payload["dry_run"] is True
     assert set(payload["snapshot"]) == {"box", "devices", "alarms", "flows", "flows_summary", "collection"}
-    assert payload["snapshot"]["collection"]["privacy"] == "private"
+    assert payload["snapshot"]["collection"]["local_raw"] is True
 
 
 @pytest.mark.integration
@@ -38,7 +38,7 @@ def test_summary_from_fixture_outputs_ai_contract(capsys):
     assert "headline" in payload
     assert payload["counts"] == {"alarms": 1, "devices": 1, "flows": 0}
     assert payload["alarm_types"] == {"ALARM_INTEL": 1}
-    assert payload["collection"]["redacted"] is True
+    assert payload["collection"]["local_raw"] is True
 
 
 @pytest.mark.integration
@@ -46,15 +46,6 @@ def test_devices_all_json_dry_run(capsys, tmp_path):
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
     assert main(["devices", "--config", str(config), "--all", "--json"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["dry_run"] is True
-
-
-@pytest.mark.integration
-def test_devices_json_redacted_dry_run(capsys, tmp_path):
-    config = tmp_path / "config.json"
-    config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
-    assert main(["devices", "--config", str(config), "--all", "--json", "--privacy", "redacted"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["dry_run"] is True
 
@@ -72,7 +63,7 @@ def test_alarms_since_days_json_dry_run(capsys, tmp_path):
 def test_cluster_from_alarm_fixture_outputs_recommendations(capsys, tmp_path):
     alarms = tmp_path / "alarms.json"
     alarms.write_text(
-        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "state": "active"}}], "collection": {"redacted": True}}),
+        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "state": "active"}}], "collection": {"local_raw": True}}),
         encoding="utf-8",
     )
     assert main(["cluster", "--alarms", str(alarms)]) == 0
@@ -86,11 +77,11 @@ def test_device_summary_and_attribute_commands(capsys, tmp_path):
     devices = tmp_path / "devices.json"
     alarms = tmp_path / "alarms.json"
     devices.write_text(
-        json.dumps({"devices": [{"fields": {"mac": "<mac:aaaaaaaaaa>", "lastActiveTimestamp": 200000}}], "collection": {"redacted": True}}),
+        json.dumps({"devices": [{"fields": {"mac": "aa:bb:cc:dd:ee:ff", "lastActiveTimestamp": 200000}}], "collection": {"local_raw": True}}),
         encoding="utf-8",
     )
     alarms.write_text(
-        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "p.device.mac": "<mac:aaaaaaaaaa>"}}], "collection": {"redacted": True}}),
+        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "p.device.mac": "aa:bb:cc:dd:ee:ff"}}], "collection": {"local_raw": True}}),
         encoding="utf-8",
     )
 
@@ -101,7 +92,7 @@ def test_device_summary_and_attribute_commands(capsys, tmp_path):
     assert main(["attribute", "--alarms", str(alarms), "--devices", str(devices)]) == 0
     attribution = json.loads(capsys.readouterr().out)
     assert attribution["attributed_alarm_count"] == 1
-    assert attribution["top_devices"][0]["device_summary"]["mac"] == "<mac:aaaaaaaaaa>"
+    assert attribution["top_devices"][0]["device_summary"]["mac"] == "aa:bb:cc:dd:ee:ff"
 
 
 @pytest.mark.integration
@@ -109,11 +100,11 @@ def test_attribute_private_inputs_emit_readable_device_summary(capsys, tmp_path)
     devices = tmp_path / "devices_private.json"
     alarms = tmp_path / "alarms_private.json"
     devices.write_text(
-        json.dumps({"devices": [{"fields": {"bname": "Game PC", "mac": "aa:bb:cc:dd:ee:ff", "ipv4Addr": "192.0.2.42"}}], "collection": {"privacy": "private"}}),
+        json.dumps({"devices": [{"fields": {"bname": "Game PC", "mac": "aa:bb:cc:dd:ee:ff", "ipv4Addr": "192.0.2.42"}}], "collection": {"local_raw": True}}),
         encoding="utf-8",
     )
     alarms.write_text(
-        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "p.device.mac": "aa:bb:cc:dd:ee:ff"}}], "collection": {"privacy": "private"}}),
+        json.dumps({"alarms": [{"alarm": {"type": "ALARM_GAME", "p.device.mac": "aa:bb:cc:dd:ee:ff"}}], "collection": {"local_raw": True}}),
         encoding="utf-8",
     )
     assert main(["attribute", "--alarms", str(alarms), "--devices", str(devices)]) == 0
@@ -139,13 +130,13 @@ def test_active_devices_command_outputs_investigation_context(capsys, tmp_path):
                         }
                     }
                 ],
-                "collection": {"privacy": "private"},
+                "collection": {"local_raw": True},
             }
         ),
         encoding="utf-8",
     )
     alarms.write_text(
-        json.dumps({"alarms": [{"alarm": {"type": "ALARM_UPNP", "p.device.mac": "aa:bb:cc:dd:ee:ff"}}], "collection": {"privacy": "private"}}),
+        json.dumps({"alarms": [{"alarm": {"type": "ALARM_UPNP", "p.device.mac": "aa:bb:cc:dd:ee:ff"}}], "collection": {"local_raw": True}}),
         encoding="utf-8",
     )
 
@@ -154,22 +145,3 @@ def test_active_devices_command_outputs_investigation_context(capsys, tmp_path):
     assert payload["summary"]["active_device_count"] == 1
     assert payload["active_devices"][0]["alarm_context"]["types"] == {"ALARM_UPNP": 1}
     assert "network_security_alarm" in payload["active_devices"][0]["investigation_indicators"]
-
-
-@pytest.mark.integration
-def test_resolve_device_dry_run_defaults_to_redacted(capsys, tmp_path):
-    config = tmp_path / "config.json"
-    config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
-    assert main(["resolve-device", "--config", str(config), "--token", "<bname:aaaaaaaaaa>"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["dry_run"] is True
-    assert payload["redacted"] is True
-
-
-@pytest.mark.integration
-def test_resolve_device_dry_run_can_request_private_fields(capsys, tmp_path):
-    config = tmp_path / "config.json"
-    config.write_text(json.dumps({"ssh_alias": "firewalla"}), encoding="utf-8")
-    assert main(["resolve-device", "--config", str(config), "--token", "<bname:aaaaaaaaaa>", "--include-private"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["private_fields_included"] is True

@@ -39,12 +39,10 @@ FIREWALLA_LIVE_TESTS=1 python -m pytest -q -m live
 - Missing config file falls back to environment variables or normal SSH target resolution.
 - Environment variable fallback: `FIREWALLA_SSH_ALIAS` overrides config; `FIREWALLA_HOST`/`FIREWALLA_SSH_USER`/`FIREWALLA_SSH_KEY` provide direct connection when no alias is present.
 
-### Privacy Mode
-- `private` mode preserves all values unchanged.
-- `redacted` mode replaces MAC addresses, IP addresses, device names, domains, and alarm messages with token format `<type:hash>`.
-- Schema keys are never modified in redacted mode.
-- Redaction is deterministic: same input produces same token on repeated calls.
-- Tokens from one artifact can be joined with tokens in another (same value maps to same token across commands).
+### Local Raw Output
+- JSON artifacts preserve real device names, IPs, MACs, domains, alarms, and flow fields.
+- Collection metadata marks live JSON artifacts as local raw output.
+- Public-facing tests and docs use fake fixtures, not transformed live data.
 
 ### Timestamp Filtering
 - `alarms --since-days N` includes alarms with payload `timestamp` or `alarmTimestamp` within the window.
@@ -67,8 +65,7 @@ FIREWALLA_LIVE_TESTS=1 python -m pytest -q -m live
 - `attribute` uses source/client fields only: `device`, `p.device.id`, `p.device.ip`, `p.device.mac`, `p.device.name`, `p.flows[].device`.
 - Infrastructure fields (`p.intf.*`) are excluded from attribution.
 - Each attributed alarm links to exactly one output device record.
-- `device_summary` is present in private mode and contains readable device identity.
-- `device_summary` is tokenized in redacted mode.
+- `device_summary` is present and contains readable device identity.
 
 ### Identity Conflict
 - `identity_conflict` flag is emitted when a device's operational name differs from its discovery alias.
@@ -78,12 +75,10 @@ FIREWALLA_LIVE_TESTS=1 python -m pytest -q -m live
 ### Snapshot & Summary
 - `snapshot` produces bounded JSON within size constraints suitable for direct LLM context insertion.
 - `summary` produces deterministic output; same input yields identical summary.
-- `snapshot --privacy redacted` applies redaction to the snapshot content.
 
 ### Dump Format
 - `dump-format` writes formatted output to `.firewalla_dumps/`.
 - Raw format preserves all values.
-- Redacted format applies tokenization.
 - Output files are self-documenting with schema indicators.
 
 ### Cluster
@@ -102,11 +97,6 @@ FIREWALLA_LIVE_TESTS=1 python -m pytest -q -m live
 - When an alarm artifact is provided, source-attributed alarm categories and types are attached to each matching active device.
 - Duplicate device display names remain distinct through record-level `device_key` output and record-index attribution.
 - Investigation indicators are emitted for identity conflicts, missing metadata, bandwidth alarms, network-security alarms, and unknown alarm types.
-
-### Resolve Device
-- `resolve-device` accepts a redacted token and returns matching device fields from the current device inventory.
-- Returns an empty result when no device matches the token.
-- Works with tokens of type `<mac:...>`, `<ip:...>`, and `<bname:...>`.
 
 ### Live Read-Only Commands
 - All commands execute against a live Firewalla without errors.

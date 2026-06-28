@@ -17,7 +17,7 @@
   "collection": {
     "generated_at": "2026-01-01T00:00:00+00:00",
     "limit": 1,
-    "redacted": true,
+    "local_raw": true,
     "source": "ssh_redis"
   },
   "devices": [
