@@ -50,9 +50,9 @@ CLI 默认 dry-run。未提供 `--execute` 时：
 - 要读取的 Redis key。
 - 要发出的 Redis 命令。
 - 如何将原始 Redis 响应转换为输出 JSON schema。
-- 隐私模式处理（直通或脱敏）。
+- 本地原始输出处理。
 
-采集器为无状态函数。它们构造只读远端 Redis 命令，解析 `redis-cli --raw` 输出，应用命令级参数和隐私模式，返回可 JSON 序列化的对象。
+采集器为无状态函数。它们构造只读远端 Redis 命令，解析 `redis-cli --raw` 输出，应用命令级参数，并返回保留真实本地值的可 JSON 序列化对象。
 
 ### 告警时间窗口
 
@@ -62,27 +62,9 @@ CLI 默认 dry-run。未提供 `--execute` 时：
 
 设备采集器读取所有 `host:mac:*` key。对每个设备提取运行名称和发现别名。当首选运行名称（`name`、`dhcpName` 等中最高优先级的非空值）与任何发现别名不一致时，设置 `identity_conflict` 标志。该标志在输出中而非自动解析，因为正确解析依赖操作者知识。
 
-## 隐私模式
+## 本地原始工件
 
-隐私转换在采集器输出层应用，而非在 Redis 读取层。采集器始终读取原始值。隐私模块随后扫描输出字典，直通（`private`）或脱敏（`redacted`）。
-
-### 脱敏算法
-
-1. 解析 JSON 输出树。
-2. 对每个字符串叶子值，匹配已知模式（MAC 地址、IP 地址、域名、设备名称 token）。
-3. 若匹配，替换为 `<type:hash>`，其中 hash 是值的确定性 SHA-256 前缀（前 10 个十六进制字符）。
-4. Schema key（字典键）永不修改。
-5. 相同值始终产生相同 token，支持跨工件关联。
-
-### 脱敏 Token 类型
-
-| Token 前缀 | 匹配模式 |
-|-----------|----------|
-| `<mac:...>` | MAC 地址 |
-| `<ip:...>` | IPv4/IPv6 地址 |
-| `<bname:...>` | 设备名称 / 主机名 |
-| `<domain:...>` | 域名 / FQDN |
-| `<message:...>` | 告警消息内容 |
+采集器保留真实设备名、IP、MAC、域名、告警消息和 flow 字段。这是可靠关联和实际网络调查所需。生成的工件属于 git 忽略的本地路径。公开文档和测试使用 fake fixture，而不是转换后的真实数据。
 
 ## 告警归因语义
 
@@ -94,7 +76,7 @@ CLI 默认 dry-run。未提供 `--execute` 时：
 
 基础设施字段（`p.intf.*`、接口标识、观测元数据）被排除。这些字段描述哪个 Firewalla 接口观测到流量，而非哪个客户端生成流量。包含它们会导致将网络基础设施误归因为告警源。
 
-在私有模式下，归因输出包含 `device_summary` 字段，含来自设备清单的可读设备身份信息。脱敏模式下该字段被 token 化。
+归因输出包含 `device_summary` 字段，含来自设备清单的可读设备身份信息。
 
 ## 工件 Schema
 
@@ -105,9 +87,7 @@ CLI 默认 dry-run。未提供 `--execute` 时：
   "alarms": [],
   "collection": {
     "source": "ssh_redis",
-    "privacy": "private",
-    "private": true,
-    "redacted": false,
+    "local_raw": true,
     "since_days": 3,
     "include_archive": true,
     "candidate_limit": 2000
@@ -115,7 +95,7 @@ CLI 默认 dry-run。未提供 `--execute` 时：
 }
 ```
 
-`cluster`、`device-summary`、`attribute`、`active-devices` 等分析命令读取这些 JSON 工件，并在输出中保留输入的隐私元数据。
+`cluster`、`device-summary`、`attribute`、`active-devices` 等分析命令读取这些 JSON 工件，并在输出中保留输入的采集元数据。
 
 ### 活跃设备调查 Schema
 
@@ -159,7 +139,7 @@ CLI 默认 dry-run。未提供 `--execute` 时：
 
 测试分为两层：
 
-**离线测试**（`-m "not live"`）：无需 Firewalla 连接。覆盖 dry-run 行为、白名单执行、变更拒绝、配置解析、隐私脱敏逻辑、时间戳过滤、schema key 保留、告警归因规则、身份冲突处理和 JSON schema 一致性。使用模拟 Redis 响应。
+**离线测试**（`-m "not live"`）：无需 Firewalla 连接。覆盖 dry-run 行为、白名单执行、变更拒绝、配置解析、本地原始输出、时间戳过滤、告警归因规则、身份冲突处理和 JSON schema 一致性。使用模拟 Redis 响应。
 
 **在线测试**（`-m live`）：由 `FIREWALLA_LIVE_TESTS=1` 控制。需要本地网络上的真实 Firewalla，且 SSH 访问已配置。端到端覆盖所有只读命令。不修改任何 Firewalla 状态。
 

@@ -6,7 +6,7 @@ AI-first CLI and root skill for local-first, read-only visibility and analysis o
 
 **Read-only by design.** The tool issues only read-only Redis commands against your Firewalla. It never modifies firewall rules, policies, Redis state, iptables, or system services.
 
-**Privacy-first.** All JSON artifacts are private by default. When you need to share artifacts (docs, issues, PRs), use `--privacy redacted` to replace real values with stable anonymous tokens while preserving schema keys for joins.
+**Local raw by design.** CLI output preserves real local values so network analysis stays useful. Keep generated artifacts in ignored local paths and use fake/minimal examples for public docs, issues, or PRs.
 
 ## Installation
 
@@ -36,14 +36,9 @@ firewalla-skill active-devices --devices reports/devices_all_latest.json --alarm
 firewalla-skill snapshot --execute
 ```
 
-## Privacy Modes
+## Local Artifacts
 
-| Mode | Behavior |
-|------|----------|
-| `private` (default) | Real values preserved. Artifacts stay in ignored paths. |
-| `redacted` | Values replaced with stable tokens such as `<mac:0123456789>`, `<ip:0123456789>`, and `<bname:0123456789>`. Schema keys unchanged. Tokens are deterministic per value, so joins work. |
-
-Use `--privacy redacted` when creating artifacts for public docs, issues, or PRs.
+JSON artifacts preserve real device names, IPs, MACs, domains, alarms, and flow fields. Write them to ignored local paths such as `reports/` or `.firewalla_dumps/`. This CLI does not provide a redaction mode.
 
 ## Security Model
 
@@ -61,13 +56,12 @@ Use `--privacy redacted` when creating artifacts for public docs, issues, or PRs
 | `alarms --json --since-days N --all` | Active and archived alarms with time-based windowing |
 | `flows` | Recent flow records by system or selected MAC |
 | `snapshot` | Bounded AI-readable snapshot |
-| `dump-format` | Local raw + redacted format dumps |
+| `dump-format` | Local raw format dumps |
 | `summary` | Deterministic JSON brief from snapshot or live read |
 | `cluster` | Alarm actionability clusters |
 | `device-summary` | Current-vs-historical device inventory buckets |
 | `attribute` | Source-aware alarm-to-device attribution |
 | `active-devices` | Last-N-days active-device investigation context |
-| `resolve-device` | Diagnostic helper for redacted artifacts |
 
 ## Alarm Attribution
 

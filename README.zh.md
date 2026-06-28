@@ -6,7 +6,7 @@
 
 **只读设计。** 工具仅对 Firewalla 发起只读 Redis 命令。不修改防火墙规则、策略、Redis 状态、iptables 或系统服务。
 
-**隐私优先。** 所有 JSON 工件默认私有。需要分享工件（文档、issue、PR）时，使用 `--privacy redacted` 将真实值替换为稳定的匿名 token，同时保留 schema key 以支持跨记录关联。
+**本地原始输出。** CLI 保留真实本地值，避免破坏网络分析。生成的工件放在被忽略的本地路径中；公开文档、issue 或 PR 使用 fake/minimal 示例。
 
 ## 安装
 
@@ -36,14 +36,9 @@ firewalla-skill active-devices --devices reports/devices_all_latest.json --alarm
 firewalla-skill snapshot --execute
 ```
 
-## 隐私模式
+## 本地工件
 
-| 模式 | 行为 |
-|------|------|
-| `private`（默认） | 保留真实值。工件留在被忽略的路径中。 |
-| `redacted` | 值替换为稳定 token，例如 `<mac:0123456789>`、`<ip:0123456789>`、`<bname:0123456789>`。Schema key 保持不变。同一值映射到同一 token，关联查询可用。 |
-
-分享公开文档、issue 或 PR 时使用 `--privacy redacted`。
+JSON 工件保留真实设备名、IP、MAC、域名、告警和 flow 字段。把它们写入 `reports/` 或 `.firewalla_dumps/` 这类被忽略的本地路径。本 CLI 不提供脱敏模式。
 
 ## 安全模型
 
@@ -61,13 +56,12 @@ firewalla-skill snapshot --execute
 | `alarms --json --since-days N --all` | 采集活跃和归档告警，基于时间窗口过滤 |
 | `flows` | 读取系统或指定 MAC 的近期流量记录 |
 | `snapshot` | 生成有界、AI 可读的快照 |
-| `dump-format` | 输出本地原始和脱敏格式转储 |
+| `dump-format` | 输出本地原始格式转储 |
 | `summary` | 从快照或实时读取生成确定性 JSON 摘要 |
 | `cluster` | 告警可操作性聚类 |
 | `device-summary` | 当前与历史设备清单分桶和类型计数 |
 | `attribute` | 源感知的告警到设备归因 |
 | `active-devices` | 最近 N 天活跃设备调查上下文 |
-| `resolve-device` | 脱敏工件诊断辅助，将匿名 token 映射回设备字段 |
 
 ## 告警归因规则
 

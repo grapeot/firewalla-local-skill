@@ -22,11 +22,11 @@ def test_live_health_read_only(capsys):
 
 
 @pytest.mark.skipif(not live_enabled(), reason="set FIREWALLA_LIVE_TESTS=1 for live Firewalla tests")
-def test_live_snapshot_read_only_redacted(tmp_path):
+def test_live_snapshot_read_only_local_raw(tmp_path):
     output = tmp_path / "snapshot.json"
-    assert main(["snapshot", "--execute", "--limit", "2", "--privacy", "redacted", "--output", str(output)]) == 0
+    assert main(["snapshot", "--execute", "--limit", "2", "--output", str(output)]) == 0
     payload = json.loads(output.read_text(encoding="utf-8"))
-    assert payload["collection"]["redacted"] is True
+    assert payload["collection"]["local_raw"] is True
     assert set(payload) == {"box", "devices", "alarms", "flows", "flows_summary", "collection"}
 
 
@@ -38,9 +38,9 @@ def test_live_dump_format_writes_gitignored_outputs(tmp_path):
 
 
 @pytest.mark.skipif(not live_enabled(), reason="set FIREWALLA_LIVE_TESTS=1 for live Firewalla tests")
-def test_live_summary_read_only_redacted(tmp_path):
+def test_live_summary_read_only_local_raw(tmp_path):
     output = tmp_path / "summary.json"
-    assert main(["summary", "--execute", "--limit", "2", "--privacy", "redacted", "--output", str(output)]) == 0
+    assert main(["summary", "--execute", "--limit", "2", "--output", str(output)]) == 0
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert "headline" in payload
     assert set(payload["counts"]) == {"devices", "alarms", "flows"}
@@ -57,7 +57,7 @@ def test_live_all_devices_and_recent_alarms_json(tmp_path):
     assert isinstance(devices_payload["devices"], list)
     assert isinstance(alarms_payload["alarms"], list)
     assert devices_payload["collection"]["all"] is True
-    assert devices_payload["collection"]["privacy"] == "private"
+    assert devices_payload["collection"]["local_raw"] is True
     assert alarms_payload["collection"]["since_days"] == 3
 
 
@@ -76,8 +76,3 @@ def test_live_device_summary_and_attribution(tmp_path):
     assert set(payload) >= {"total_alarms", "attributed_alarm_count", "unattributed_alarm_count", "top_devices"}
     if payload["top_devices"]:
         assert "device_summary" in payload["top_devices"][0]
-
-
-@pytest.mark.skipif(not live_enabled(), reason="set FIREWALLA_LIVE_TESTS=1 for live Firewalla tests")
-def test_live_resolve_device_dry_run_only():
-    assert main(["resolve-device", "--token", "<bname:aaaaaaaaaa>"]) == 0

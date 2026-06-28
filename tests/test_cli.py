@@ -11,19 +11,13 @@ from firewalla_skill.cli import (
     build_active_devices_payload,
     build_ssh_command,
     cluster_alarms_payload,
-    device_matches_token,
     device_display_id,
     device_summary_fields,
-    extract_alarm_source_tokens,
-    field_tokens,
+    extract_alarm_source_values,
     filter_alarms_since,
     main,
     load_local_config,
     pair_lines_to_dict,
-    redact_sensitive_text,
-    redacted_command,
-    resolve_device_payload,
-    stable_token,
     summarize_devices_payload,
     summarize_snapshot,
     zrange_with_scores_to_pairs,
@@ -47,20 +41,20 @@ def test_build_redis_raw_command_preserves_read_only_allowlist():
         build_redis_raw_command(["DEL", "x"])
 
 
-def test_redacted_command_masks_host_and_key():
+def test_build_ssh_command_keeps_real_destination_and_key():
     command = build_ssh_command(
         SshTarget(host="192.0.2.1", user="pi", key="/secret/key"),
         "redis-cli SCAN 0",
     )
-    assert redacted_command(command) == [
+    assert command == [
         "ssh",
         "-o",
         "BatchMode=yes",
         "-o",
         "IdentitiesOnly=yes",
         "-i",
-        "<ssh-key>",
-        "pi@<firewalla-host>",
+        "/secret/key",
+        "pi@192.0.2.1",
         "redis-cli SCAN 0",
     ]
 
@@ -76,26 +70,7 @@ def test_ssh_alias_uses_config_destination_without_user_or_port():
         "firewall",
         "hostname",
     ]
-    assert redacted_command(command) == [
-        "ssh",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "IdentitiesOnly=yes",
-        "<ssh-alias>",
-        "hostname",
-    ]
-
-
-def test_redact_sensitive_text_masks_local_network_identifiers():
-    text = "device aa:bb:cc:dd:ee:ff at 192.0.2.42 and 52.1.2.3 calling example.test via fe80::1/64"
-    assert "aa:bb:cc:dd:ee:ff" not in redact_sensitive_text(text)
-    assert stable_token("mac", "aa:bb:cc:dd:ee:ff") in redact_sensitive_text(text)
-
-
-def test_redact_sensitive_text_does_not_mask_uptime_clock():
-    text = "17:05:24 up 5 days"
-    assert redact_sensitive_text(text) == text
+    assert command[-2] == "firewall"
 
 
 def test_pair_lines_to_dict_parses_json_values():
@@ -106,29 +81,19 @@ def test_pair_lines_to_dict_parses_json_values():
     }
 
 
-def test_redacted_json_value_preserves_schema_keys():
-    from firewalla_skill.cli import redacted_json_value
-
-    redacted = redacted_json_value({"p.device.ip": "192.0.2.42", "p.intf.subnet": "192.0.2.1/24"})
-    assert "p.device.ip" in redacted
-    assert "p.intf.subnet" in redacted
-    assert redacted["p.device.ip"] == stable_token("ip", "192.0.2.42")
-    assert redacted_json_value({"device": "aa:bb:cc:dd:ee:ff"})["device"] == stable_token("mac", "aa:bb:cc:dd:ee:ff")
-
-
 def test_zrange_with_scores_to_pairs_parses_scores_and_json_values():
     assert zrange_with_scores_to_pairs(['{"dest":"example.test"}', "1700000000"]) == [
         {"value": {"dest": "example.test"}, "score": 1700000000.0}
     ]
 
 
-def test_devices_dry_run_outputs_redacted_command(capsys):
+def test_devices_dry_run_outputs_real_command(capsys):
     code = main(["devices", "--host", "192.0.2.1", "--key", "/secret/key"])
     assert code == 0
     output = json.loads(capsys.readouterr().out)
     assert output["dry_run"] is True
-    assert "pi@<firewalla-host>" in output["command"]
-    assert "/secret/key" not in output["command"]
+    assert "pi@192.0.2.1" in output["command"]
+    assert "/secret/key" in output["command"]
 
 
 def test_local_config_can_provide_ssh_alias(tmp_path, capsys):
@@ -137,7 +102,7 @@ def test_local_config_can_provide_ssh_alias(tmp_path, capsys):
     code = main(["health", "--config", str(config)])
     assert code == 0
     output = json.loads(capsys.readouterr().out)
-    assert output["command"][-2] == "<ssh-alias>"
+    assert output["command"][-2] == "firewalla"
 
 
 def test_load_local_config_missing_file_returns_empty_dict(tmp_path):
@@ -150,7 +115,7 @@ def test_summarize_snapshot_counts_p0_surfaces():
         "devices": [{"fields": {"mac": "<mac>"}}],
         "alarms": [{"alarm": {"type": "ALARM_GAME", "state": "active"}}],
         "flows": [{"value": {"dp": 443, "pr": "tcp", "fd": "in"}}],
-        "collection": {"redacted": True},
+        "collection": {"local_raw": True},
     }
     summary = summarize_snapshot(snapshot)
     assert summary["counts"] == {"devices": 1, "alarms": 1, "flows": 1}
@@ -165,7 +130,7 @@ def test_cluster_alarms_payload_classifies_actionability():
             {"source": "alarm_active", "alarm": {"type": "ALARM_LARGE_UPLOAD", "state": "active", "timestamp": 1700000100}},
             {"source": "alarm_active", "alarm": {"type": "ALARM_INTEL", "state": "active", "timestamp": 1700000200}},
         ],
-        "collection": {"redacted": True},
+        "collection": {"local_raw": True},
     }
     clustered = cluster_alarms_payload(payload)
     assert clustered["clusters"]["by_category"] == {
@@ -179,26 +144,25 @@ def test_cluster_alarms_payload_classifies_actionability():
 def test_summarize_devices_payload_buckets_activity():
     payload = {
         "devices": [
-            {"fields": {"lastActiveTimestamp": 200000 - 60, "detect": {"type": "phone"}, "mac": stable_token("mac", "a")}},
+            {"fields": {"lastActiveTimestamp": 200000 - 60, "detect": {"type": "phone"}, "mac": "aa:bb:cc:dd:ee:ff"}},
             {"fields": {"lastActiveTimestamp": 200000 - 2 * 24 * 3600, "detect": {"type": "desktop"}}},
             {"fields": {"lastActiveTimestamp": 200000 - 40 * 24 * 3600}},
         ],
-        "collection": {"redacted": True},
+        "collection": {"local_raw": True},
     }
     summary = summarize_devices_payload(payload, now=datetime.fromtimestamp(200000, UTC))
     assert summary["activity_buckets"] == {"active_1_to_3d": 1, "active_24h": 1, "inactive_over_30d": 1}
     assert summary["detect_types"] == {"<missing>": 1, "desktop": 1, "phone": 1}
 
 
-def test_attribute_alarms_to_devices_uses_stable_tokens():
-    mac_token = stable_token("mac", "aa:bb:cc:dd:ee:ff")
-    devices = {"devices": [{"fields": {"mac": mac_token, "lastActiveTimestamp": 1}}], "collection": {"redacted": True}}
+def test_attribute_alarms_to_devices_uses_source_values():
+    devices = {"devices": [{"fields": {"mac": "aa:bb:cc:dd:ee:ff", "lastActiveTimestamp": 1}}], "collection": {"local_raw": True}}
     alarms = {
         "alarms": [
-            {"alarm": {"type": "ALARM_GAME", "p.device.mac": mac_token}},
-            {"alarm": {"type": "ALARM_INTEL", "message": "no matching token"}},
+            {"alarm": {"type": "ALARM_GAME", "p.device.mac": "aa:bb:cc:dd:ee:ff"}},
+            {"alarm": {"type": "ALARM_INTEL", "message": "no matching source device"}},
         ],
-        "collection": {"redacted": True},
+        "collection": {"local_raw": True},
     }
     attribution = attribute_alarms_to_devices(alarms, devices)
     assert attribution["attributed_alarm_count"] == 1
@@ -207,13 +171,11 @@ def test_attribute_alarms_to_devices_uses_stable_tokens():
     assert "p.device.*" in attribution["limitations"][0]
 
 
-def test_alarm_source_tokens_exclude_firewalla_interface_fields():
-    device_token = stable_token("mac", "aa:bb:cc:dd:ee:ff")
-    gateway_token = stable_token("ip", "192.0.2.1")
-    alarm = {"alarm": {"p.device.mac": device_token, "p.intf.subnet": f"{gateway_token}/24", "p.flows": [{"device": device_token}]}}
-    tokens = extract_alarm_source_tokens(alarm)
-    assert device_token in tokens
-    assert gateway_token not in tokens
+def test_alarm_source_values_exclude_firewalla_interface_fields():
+    alarm = {"alarm": {"p.device.mac": "aa:bb:cc:dd:ee:ff", "p.intf.subnet": "192.0.2.1/24", "p.flows": [{"device": "aa:bb:cc:dd:ee:ff"}]}}
+    values = extract_alarm_source_values(alarm)
+    assert "aa:bb:cc:dd:ee:ff" in values
+    assert "192.0.2.1/24" not in values
 
 
 def test_device_display_prefers_current_name_over_stale_alias():
@@ -232,44 +194,6 @@ def test_device_display_prefers_current_name_over_stale_alias():
     assert summary["name"] == "CurrentBox"
     assert "Old Laptop Alias" in summary["aliases"]
     assert summary["identity_conflict"]["current_name_candidates"] == ["currentbox"]
-
-
-def test_field_tokens_supports_private_lookup():
-    assert stable_token("bname", "Example Device") in field_tokens("bname", "Example Device")
-    assert stable_token("mac", "aa:bb:cc:dd:ee:ff") in field_tokens("mac", "aa:bb:cc:dd:ee:ff")
-
-
-def test_resolve_device_payload_redacts_by_default():
-    output = resolve_device_payload(
-        stable_token("bname", "Example Device"),
-        [
-            {
-                "redis_key": "host:mac:aa:bb:cc:dd:ee:ff",
-                "matched_fields": ["bname"],
-                "fields": {"bname": "Example Device", "ipv4Addr": "192.0.2.1"},
-            }
-        ],
-    )
-    fields = output["matches"][0]["fields"]
-    assert output["collection"]["redacted"] is True
-    assert fields["bname"] == stable_token("bname", "Example Device")
-    assert fields["ipv4Addr"] == stable_token("ip", "192.0.2.1")
-    assert "aa:bb:cc:dd:ee:ff" not in output["matches"][0]["redis_key"]
-
-
-def test_resolve_device_payload_can_include_private_fields():
-    output = resolve_device_payload(
-        stable_token("bname", "Example Device"),
-        [{"redis_key": "host:mac:aa:bb:cc:dd:ee:ff", "matched_fields": ["bname"], "fields": {"bname": "Example Device"}}],
-        include_private=True,
-    )
-    assert output["collection"]["private_fields_included"] is True
-    assert output["matches"][0]["fields"]["bname"] == "Example Device"
-
-
-def test_device_matches_token_returns_matching_fields():
-    token = stable_token("bname", "Example Device")
-    assert device_matches_token({"bname": "Example Device", "name": "Other"}, token) == ["bname"]
 
 
 def test_filter_alarms_since_uses_payload_timestamp_not_source_score():
@@ -301,7 +225,7 @@ def test_build_active_devices_payload_joins_alarm_context_and_indicators():
             {"fields": {"name": "OldDevice", "lastActiveTimestamp": 200000 - 10 * 24 * 3600}},
             {"fields": {"name": "MissingActivity"}},
         ],
-        "collection": {"privacy": "private"},
+        "collection": {"local_raw": True},
     }
     alarms = {
         "alarms": [
@@ -329,11 +253,11 @@ def test_build_active_devices_payload_keeps_duplicate_display_names_distinct():
             {"redis_key": "host:mac:aa:bb:cc:dd:ee:01", "fields": {"name": "Watch", "mac": "aa:bb:cc:dd:ee:01", "lastActiveTimestamp": 200000}},
             {"redis_key": "host:mac:aa:bb:cc:dd:ee:02", "fields": {"name": "Watch", "mac": "aa:bb:cc:dd:ee:02", "lastActiveTimestamp": 200000}},
         ],
-        "collection": {"privacy": "private"},
+        "collection": {"local_raw": True},
     }
     alarms = {
         "alarms": [{"alarm": {"type": "ALARM_LARGE_UPLOAD", "p.device.mac": "aa:bb:cc:dd:ee:02"}}],
-        "collection": {"privacy": "private"},
+        "collection": {"local_raw": True},
     }
 
     payload = build_active_devices_payload(devices, alarms, since_days=7, now=datetime.fromtimestamp(200000, UTC))

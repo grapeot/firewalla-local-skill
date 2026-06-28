@@ -17,13 +17,12 @@ The tool produces structured JSON artifacts that an AI agent can consume directl
 
 - SSH-based access to Firewalla Redis.
 - Read-only Redis command execution with a strict allowlist.
-- JSON artifact generation across the CLI command set: health, devices, alarms, flows, snapshot, dump-format, summary, cluster, device-summary, attribute, active-devices, and resolve-device.
-- Two privacy modes: `private` (real values, private paths) and `redacted` (stable anonymous tokens, shareable).
+- JSON artifact generation across the CLI command set: health, devices, alarms, flows, snapshot, dump-format, summary, cluster, device-summary, attribute, and active-devices.
+- Local raw artifacts that preserve real values for analysis and stay in ignored paths.
 - Time-bounded alarm collection with configurable candidate limits.
 - Source-aware device attribution with identity conflict detection.
 - Active-device investigation views that join inventory, recent alarms, identity metadata, and triage indicators.
 - Offline and live test suites.
-- `resolve-device` diagnostic tool for redacted artifacts.
 
 ## Non-Goals
 
@@ -71,11 +70,9 @@ Device display ID resolution prefers current operational names over stale discov
 
 When operational names disagree with aliases (e.g., device renamed but old Bonjour name still cached), the tool emits an `identity_conflict` flag rather than silently picking one side.
 
-## Privacy Model
+## Local Artifact Model
 
-**Private mode (default):** Artifacts contain real device names, IPs, MACs, domains, and alarm messages. These artifacts live in git-ignored paths (`reports/`, `.firewalla_dumps/`, `.firewalla.local.json`, `.env`). They never enter the repository.
-
-**Redacted mode:** All identifiable values are replaced with stable, deterministic tokens prefixed by type (`<mac:...>`, `<ip:...>`, `<bname:...>`, `<domain:...>`). Schema keys are preserved verbatim. Token mapping is deterministic per value — the same MAC always maps to the same token, allowing cross-record joins on redacted artifacts. Redacted mode is for sharing in docs, issues, and PRs.
+Artifacts contain real device names, IPs, MACs, domains, alarm messages, and flow fields. This is intentional: redaction destroys important joins and makes network analysis less reliable. Generated artifacts live in git-ignored paths (`reports/`, `.firewalla_dumps/`, `.firewalla.local.json`, `.env`). Public docs, tests, issues, and PRs use fake or minimal examples instead of transformed live data.
 
 ## Acceptance Criteria
 
@@ -87,7 +84,6 @@ When operational names disagree with aliases (e.g., device renamed but old Bonjo
 - `attribute` correctly separates source/client fields from infrastructure/interface fields.
 - `active-devices` emits active devices with readable identity summaries, alarm context, and investigation indicators.
 - `identity_conflict` is emitted when operational names disagree with discovery aliases.
-- `redacted` mode produces deterministic tokens: same input yields same token, schema keys are unchanged.
 - Read-only allowlist is enforced: any write command is rejected.
 - Offline tests pass without Firewalla connectivity.
 - Live tests pass with `FIREWALLA_LIVE_TESTS=1`.
